@@ -26,7 +26,7 @@ PORT = int(os.environ.get("COLASEEDBOX_PORT", "3006"))
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("colaseedbox")
 
-app = FastAPI(title="ColaSeedBox", version="0.2.0", docs_url="/api/docs", redoc_url=None)
+app = FastAPI(title="ColaSeedBox", version="0.2.1", docs_url="/api/docs", redoc_url=None)
 templates = Jinja2Templates(directory=str(BASE / "templates"))
 syncer = Syncer(CONFIG_PATH)
 
@@ -123,4 +123,4 @@ def run_now() -> dict:
 
 @app.get("/api/health")
 def health() -> dict:
-    return {"ok": True, "service": "colaseedbox", "port": PORT, "version": "0.2.0"}
+    return {"ok": True, "service": "colaseedbox", "port": PORT, "version": "0.2.1"}

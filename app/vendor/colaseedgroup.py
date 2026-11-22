@@ -1067,6 +1067,13 @@ class QBittorrentClient(_Client):
                     return "dup"
                 logger.warn(f"qBittorrent ({self.name}) 拒绝种子（重复或无效）：{hash_hint[:12] or '未知 hash'}")
                 return "fail"
+            if rsp.status_code in (403, 429):
+                # 403/429 是「限流了」，不是这颗种子有问题：通过 Cloudflare 隧道访问时，
+                # 短时间内连续 POST 会被 CF 挡下来（2026-11-22 实测：一次补 271 颗，
+                # 全部 403，等 60 秒后恢复）。必须与「坏种」区分开，否则整池种子会被
+                # 误记成 fail 并关 7 天。
+                logger.warn(f"qBittorrent ({self.name}) 被限流（{rsp.status_code}），本轮暂停加种")
+                return "ratelimit"
             logger.warn(f"qBittorrent ({self.name}) 添加种子失败：{rsp.status_code} {body[:120]}")
         except Exception as err:
             logger.error(f"qBittorrent ({self.name}) 添加种子异常：{err}")
@@ -1958,6 +1965,8 @@ class ColaSeedGroup(_PluginBase):
                 out["dropped"] += 1
                 out["dropped_names"].append(f"{name}（{seeders} 做种）")
                 items.pop(info_hash, None)
+                # 删了就清掉跳过记录，否则这颗在 TTL 内再也进不了候选（缺口补不回）
+                self._sg_unmark_skip(record)
             else:
                 out["failed"] += 1
 
@@ -2812,7 +2821,7 @@ class ColaSeedGroup(_PluginBase):
                     continue
                 items.append({
                     "torrent_id": version.get("id"),
-                    "info_hash": "",
+                    "info_hash": str(version.get("info_hash") or "").lower(),
                     "name": str(version.get("release_name") or ""),
                     "size": version.get("size_bytes") or version.get("size") or 0,
                     "seeders": int(version.get("seeders") or 0),
@@ -2823,16 +2832,25 @@ class ColaSeedGroup(_PluginBase):
     def _sg_candidates(self) -> List[Dict[str, Any]]:
         """把官方资源池拉全：开放 API listMedia（official=true, view=torrents）。
 
-        total 是**作品数**，一页 SG_BROWSE_PAGE_SIZE 个作品，每个作品的官方版本数不定 ——
-        拿种子数跟作品数比会提前收工（实测只拿到 247 条），所以按作品数翻页。
+        listMedia 的 `view=torrents` 一页一条版本，按 total 翻页（见 `_sg_collect`）。
+
+        **info_hash 的补全**：候选过滤靠「hash 不在 existing」。开放 API 的版本对象带
+        `info_hash`，直接用；万一缺（老站点或结构漂移），再用 `seedgroup_items` 里
+        torrent_id → info_hash 的映射补回去（0.2.23：生产实测会话面版本对象不带 hash，
+        已覆盖的种子照样进候选、被判 dup，缺口一动不动）。加过的种子因此能被正确过滤，
+        没加过的仍是空串（它们本来就是缺的）。
         """
         # 保种只保官方种（老板 2026-11-15 明确）
         probe = lambda page: self._sg_official_browse_page(page, True)  # noqa: E731
         items, _total, _source = self._sg_collect(probe)
         if items:
             self.save_data("seedgroup_pool_source", "open-api-official")
-            return items
-        return []
+        by_tid = {str(v.get("torrent_id")): str(k).lower()
+                  for k, v in (self._sg_items() or {}).items() if isinstance(v, dict)}
+        for it in items:
+            if not it.get("info_hash"):
+                it["info_hash"] = by_tid.get(str(it.get("torrent_id")), "")
+        return items
 
     def _sg_collect(self, probe) -> Tuple[List[Dict[str, Any]], int, str]:
         """逐页收 listMedia 的结果。
@@ -2973,19 +2991,32 @@ class ColaSeedGroup(_PluginBase):
 
     SG_MAX_PAGES = 50
     SG_BROWSE_PAGE_SIZE = 50
-    SG_MACHINE_PAGE_SIZE = 100
-    SG_DOWNLOAD_GAP = 0.7        # 每颗之间停一下：站点下载限流 120 次/分，一颗要 2 个请求
+    SG_DOWNLOAD_GAP = 2.0        # 每颗之间停一下：站点下载限流 120 次/分，一颗 2 个请求；
+                                 # 走 Cloudflare 隧道时 POST 也会被 CF 限流，2 秒更稳（实测 0.7 秒会撞 403）
     SG_SKIP_TTL = 7 * 86400      # 「加不进去」的种子记 7 天，别再每轮白下载一遍
     # 网络类失败（连接被重置/超时）不是种子的问题，是那条线的问题 —— 只退避几分钟，
     # 不能像坏种那样关 7 天，否则一次抖动就把 371 条全锁死（2026-11-20 就是这么丢的缺口）。
+    SG_SKIP_TTL_DUP = 86400      # 「客户端已有」的记录只留 1 天：删种后要能自愈
     SG_SKIP_TTL_NET = 300
+    SG_RATE_LIMIT_STOP = 3       # 连续这么多次被判限流就结束本轮
     SG_ADD_RETRY = 2             # 单条加种的额外重试次数（网络类才重试）
     SG_ADD_RETRY_BACKOFF = 2     # 重试间隔：2s、4s
     SG_CLIENT_OFFLINE_AFTER = 3  # 连续这么多轮读不到客户端 → 判掉线（前两轮沿用上次读数）
 
     def _sg_skip_ttl(self, reason: str) -> int:
-        """这条跳过记录能活多久。网络类是短退避，其余（坏种/重复）才用 7 天。"""
-        return self.SG_SKIP_TTL_NET if reason in ("net", "error") else self.SG_SKIP_TTL
+        """这条跳过记录能活多久。
+
+        · net / error：网络类，5 分钟后重试；
+        · dup：客户端里「已经有」—— 但池子不带 hash，只能靠这张表挡重复，
+          所以它同时承担了「已覆盖」的记账职责。一旦种子被外部删掉（用户手动删、
+          qB 丢种），记录就不成立了，因此只给 1 天，让它自然失效而不是拖 7 天；
+        · 其余（坏种）：7 天。
+        """
+        if reason in ("net", "error"):
+            return self.SG_SKIP_TTL_NET
+        if reason == "dup":
+            return self.SG_SKIP_TTL_DUP
+        return self.SG_SKIP_TTL
 
     def _sg_skips(self) -> Dict[str, Any]:
         """读的时候也清一遍过期：没有新写入时，过期条目不能永久生效。
@@ -3041,6 +3072,23 @@ class ColaSeedGroup(_PluginBase):
                 logger.info(f"保种组加种网络异常（第 {attempt + 1} 次），{delay}s 后重试：{err}")
                 time.sleep(delay)
         return None, last
+
+    def _sg_unmark_skip(self, record: Dict[str, Any]) -> None:
+        """删掉种子之后清掉它的跳过记录。
+
+        为什么必须清：跳过表的 `dup` 表示「客户端里已经有这颗」。会话面的资源池
+        **不带 info_hash**（见 `_sg_candidates` 的注释），所以候选过滤里那条
+        「hash 不在 existing」对池子无效 —— 唯一拦住重复加种的就是这张表。
+        一旦种子被轮换或下架清理删掉，`dup` 就不成立了；不清的话它会在 TTL
+        （7 天）内一直挡住这颗种子，缺口补不回来（2026-11-22 实测：缺 17 条
+        297 GiB，其中 16 条都是这种过期的 dup）。
+        """
+        key = _seed_group_key(record or {})
+        if not key:
+            return
+        skips = self._sg_skips()
+        if skips.pop(key, None) is not None:
+            self.save_data("seedgroup_skip", skips)
 
     def _sg_items(self) -> Dict[str, Any]:
         data = self.get_data("seedgroup_items") or {}
@@ -3162,6 +3210,8 @@ class ColaSeedGroup(_PluginBase):
                     continue
                 out["removed"] += 1
                 items.pop(info_hash, None)
+                # 同上：删了就清跳过记录，否则下架的种子被重新上架后永远加不回来
+                self._sg_unmark_skip(record)
                 logger.info(f"保种组清理：{client.name} 删除 {info_hash[:12]}"
                             f"（torrent_id={torrent_id}，文件{'一并删除' if self._seedgroup_prune_files else '保留'}）")
         self.save_data("seedgroup_items", items)
@@ -3353,7 +3403,41 @@ class ColaSeedGroup(_PluginBase):
             planned_gib = round(sum(_seed_group_size_gib(x.get("size")) for x in picked), 3)
             shortfall = round(max(0.0, need - planned_gib), 3)
         client = clients[0]
+        # 文件已经不在磁盘上的保种种子（qB 状态 missingFiles）：留着它既做不了种、又占着
+        # 「客户端已有」的位置，覆盖永远算不上。直接删种子（不动文件，本来也没有），
+        # 下一轮从站点重新下载。
+        missing_cleaned = 0
+        try:
+            existing_torrents = client.list_completed() if hasattr(client, "list_completed") else []
+        except Exception:
+            existing_torrents = []
+        for t in existing_torrents or []:
+            if SEED_GROUP_TAG not in str(t.get("tags") or ""):
+                continue
+            if str(t.get("state") or "") != "missingFiles":
+                continue
+            h = str(t.get("hash") or "").lower()
+            if not h:
+                continue
+            try:
+                if client.delete([h], delete_files=False):
+                    missing_cleaned += 1
+                    rec = {"info_hash": h}
+                    for k, v in (items or {}).items():
+                        if k == h:
+                            rec = v
+                            items.pop(k, None)
+                            break
+                    self._sg_unmark_skip(rec)
+                    logger.info(f"保种组：{h[:12]} 文件已丢失（missingFiles），删种等待重新下载")
+            except Exception as err:
+                logger.warn(f"保种组：清理 missingFiles 种子 {h[:12]} 失败：{err}")
+        if missing_cleaned:
+            self.save_data("seedgroup_items", items)
+            state["missing_cleaned"] = missing_cleaned
+
         added = duplicate = failed = 0
+        rate_limited = 0
         added_gib = 0.0
         for item in picked:
             if self._event.is_set():
@@ -3369,19 +3453,36 @@ class ColaSeedGroup(_PluginBase):
             # 客户端里已经有了就直接记「重复」，不要塞进去让 qB 回 Fails 再算失败。
             info_hash = _torrent_info_hash(data) or str(item.get("info_hash") or "")
             if info_hash and client.has(info_hash):
-                # 客户端里已经有这颗：补上「可乐保种组」标签，否则 _sg_current 永远算不到它的体积，
-                # 固定档位会长期显示缺口。补完记进映射，下一轮就能统计到。
+                # 客户端里已经有这颗（可能是辅种来的、tags 是别的站）：**补上「可乐保种组」**
+                # 否则 _sg_current 只统计带本标签的种子，它的体积永远算不进覆盖 ——
+                # 而 has() 又为真，插件会一直认为「已经有了」而不加种。
+                # 这种「在客户端但不计入覆盖」的种子 2026-11-22 实测有 8 条、164 GiB。
                 duplicate += 1
                 self._sg_remember_item(info_hash, item)
-                # 也记进跳过表：客户端里已经有它，下一轮别再为它下载 .torrent
-                # （以前只补标签不记 skip，于是每轮都重复挑中同一颗，duplicate 永远是 2）
-                self._sg_mark_skip(item, "dup")
+                tagged = False
                 try:
-                    client.add_tags(info_hash, SEED_GROUP_TAG)
+                    tagged = bool(client.add_tags(info_hash, SEED_GROUP_TAG))
                 except Exception as err:
                     logger.warn(f"保种组：给已有种子补标签失败（{info_hash[:12]}）：{err}")
+                if tagged:
+                    # 只有补标签成功才记 dup：它现在确实算覆盖了，下一轮别再为它下载 .torrent。
+                    self._sg_mark_skip(item, "dup")
+                else:
+                    # 补失败就**不记**：下一轮会重新挑中它再试一次。
+                    # 以前无条件记 dup，于是这颗永远补不上标签、永远不算覆盖（生产缺口的真凶之一）。
+                    logger.warn(f"保种组：{info_hash[:12]} 在客户端但补标签未成功，下一轮重试")
                 continue
             result, err = self._sg_add_with_retry(client, data, info_hash)
+            if result == "ratelimit":
+                # 限流不等于这颗加不进去：记 net（5 分钟后重试），并且连续几次就收手，
+                # 免得继续 POST 把限流窗口越拉越长。
+                rate_limited += 1
+                if rate_limited >= self.SG_RATE_LIMIT_STOP:
+                    logger.warn(f"保种组：连续 {rate_limited} 次被限流，本轮停止加种（已加 {added} 条）")
+                    break
+                failed += 1
+                self._sg_mark_skip(item, "net")
+                continue
             if result is None:
                 # 重试过仍然连不上：这是网络问题，不是这颗种子的问题 —— 记短退避（5 分钟），
                 # 下一轮还会试它，而不是像坏种那样关 7 天。

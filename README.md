@@ -5,7 +5,7 @@
 > **和 MP 插件的区别**
 > - 插件版：跑在 MoviePilot 里，能用 MP 的下载器、MP 的整理/刮削
 > - **独立版（本仓库）**：只有保种。**不含** MP 的加种后自动整理、刮削、订阅、下载器管理 —— 那些是 MP 的职责
-> - 两者的保种逻辑是同一份代码（`app/vendor/colaseedgroup.py` 就是插件 0.3.0 的源码，与 moviepilot-plugin-colaseedgroup 逐字节相同）
+> - 两者的保种逻辑是同一份代码（`app/vendor/colaseedgroup.py` 就是插件 0.3.0 的源码，与 moviepilot-plugin-colaseedgroup main（1264bfe）逐字节相同）
 
 ---
 
