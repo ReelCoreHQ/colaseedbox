@@ -5,7 +5,7 @@
 > **和 MP 插件的区别**
 > - 插件版：跑在 MoviePilot 里，能用 MP 的下载器、MP 的整理/刮削
 > - **独立版（本仓库）**：只有保种。**不含** MP 的加种后自动整理、刮削、订阅、下载器管理 —— 那些是 MP 的职责
-> - 两者的保种逻辑是同一份代码（`app/vendor/colaseedgroup.py` 就是插件的源码）
+> - 两者的保种逻辑是同一份代码（`app/vendor/colaseedgroup.py` 就是插件 0.3.0 的源码，与 moviepilot-plugin-colaseedgroup 逐字节相同）
 
 ---
 
@@ -48,7 +48,7 @@ docker run -d --name colaseedbox --restart unless-stopped \
 
 | 区块 | 填什么 |
 |---|---|
-| **① 可乐PT 账号** | 用户名 / 密码 / 验证码（先在站点插件页取图） |
+| **① 可乐PT API Key** | 在站点「账号 → Key → API Key」（<https://www.colapt.com/account/tracker?tab=api>）新建一把，范围勾**读取**和**下载**，粘进来保存。只放在 `X-API-Key` 请求头里，不再需要账号密码和验证码 |
 | **② 下载器** | 每行 `地址,用户名,密码`；Transmission 写 `tr,地址,用户名,密码` |
 | **⑤ 保种组** | 档位（2T~20T / 自定义 / 全站官种）、运行间隔、进种限流、下架清理 |
 | **⑤-2 限速** | 留空或 0 = 不接管 |
@@ -83,7 +83,7 @@ docker run -d --name colaseedbox --restart unless-stopped \
 3. 缺口 > 0 → 从池子里挑种子补进来（每颗之间停 0.7 秒，避开站点下载限流）
 4. 达标后**动态轮换**：删做种人数最多的 N 颗、补最少的 N 颗
 5. **下架清理**：回站核对，已下架的从本地删（默认只删种子保留文件）
-6. 把本轮结果上报站点（供工作组审核）
+6. 把本轮结果上报站点（是否进考核由站点按账号身份判定）
 
 ### 读数失败的数学
 
@@ -101,7 +101,7 @@ docker run -d --name colaseedbox --restart unless-stopped \
 | 方法 | 路径 | 用途 |
 |---|---|---|
 | GET | `/` | 配置页 |
-| GET | `/api/config` | 读配置（密码只回传「是否已设置」） |
+| GET | `/api/config` | 读配置（API Key 只回传「是否已设置」） |
 | POST | `/api/config` | 写配置 |
 | GET | `/api/status` | 运行状态 + 最近一轮结果 |
 | POST | `/api/run` | 立即跑一轮 |
@@ -122,8 +122,11 @@ docker run -d --name colaseedbox --restart unless-stopped \
 
 ## 常见问题
 
-**面板打得开，但「立即跑一轮」报「还没登录」**
-先在站点插件页取验证码，填进「① 可乐PT 账号 → 验证码」，保存后再跑。
+**面板打得开，但「立即跑一轮」报「还没填可乐PT 的 API Key」**
+到站点新建一把勾「读取」「下载」的 API Key，填进「① 可乐PT API Key」，保存后再跑。0.2.0 起不再用账号密码 + 验证码（站点会删掉那套登录入口），旧配置里的账号密码会被忽略。
+
+**提示 API Key 不能用**
+401 是 Key 填错、被撤销或过期；403 `api_key_scope_denied` 是缺范围（要「读取」拉官种、核对下架、领上报票据，「下载」取种子）。
 
 **覆盖一直是 0**
 看日志里有没有 `读不到种子`。如果是，检查下载器地址/账号，以及容器能不能连到它（`docker exec colaseedbox curl -s http://你的qB:8081`）。

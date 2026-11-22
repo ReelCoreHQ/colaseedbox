@@ -26,7 +26,7 @@ PORT = int(os.environ.get("COLASEEDBOX_PORT", "3006"))
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("colaseedbox")
 
-app = FastAPI(title="ColaSeedBox", version="0.1.0", docs_url="/api/docs", redoc_url=None)
+app = FastAPI(title="ColaSeedBox", version="0.2.0", docs_url="/api/docs", redoc_url=None)
 templates = Jinja2Templates(directory=str(BASE / "templates"))
 syncer = Syncer(CONFIG_PATH)
 
@@ -90,10 +90,9 @@ def index(request: Request) -> HTMLResponse:
 @app.get("/api/config")
 def get_config() -> dict:
     cfg = syncer.load()
-    # 密码类字段只回传「是否已设置」，不回显明文
-    safe = {k: v for k, v in cfg.items() if k not in ("password", "session_token")}
-    safe["password_set"] = bool(cfg.get("password"))
-    safe["session_token_set"] = bool(cfg.get("session_token"))
+    # API Key 只回传「是否已设置」，不回显明文
+    safe = {k: v for k, v in cfg.items() if k != "api_key"}
+    safe["api_key_set"] = bool(cfg.get("api_key"))
     safe["keys"] = list(CONFIG_KEYS)
     safe["defaults"] = DEFAULTS
     return safe
@@ -124,4 +123,4 @@ def run_now() -> dict:
 
 @app.get("/api/health")
 def health() -> dict:
-    return {"ok": True, "service": "colaseedbox", "port": PORT}
+    return {"ok": True, "service": "colaseedbox", "port": PORT, "version": "0.2.0"}
