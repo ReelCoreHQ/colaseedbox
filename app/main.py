@@ -1,7 +1,7 @@
 """可乐保种组 Docker 版（colaseedgroup-docker）：不需要 MoviePilot 的独立服务。
 
 执行器逻辑与 MoviePilot 插件 0.7.0 是同一份（app/seedgroup/，逐字节搬来）；
-这里是外壳：配置、定时运行、端口 3006 上的小面板。
+这里是外壳：配置、定时运行、端口 3006 上的小面板（要登录，见 auth.py）。
 """
 
 import logging
@@ -11,9 +11,10 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 
 from . import view
+from .auth import MAX_PASSWORD, SESSION_TTL, Auth, PasswordError
 from .config import ConfigError, Store, merge_update, missing_fields, public_view
 from .runner import Runner
 from .seedgroup import VERSION
@@ -29,6 +30,11 @@ logging.getLogger("uvicorn.access").disabled = True
 
 store = Store(DATA_DIR)
 runner = Runner(store)
+auth = Auth(DATA_DIR, env_password=os.environ.get("COLASEEDGROUP_PASSWORD"))
+
+COOKIE = "colaseedgroup_session"
+# 不登录也能访问的路径；其余全部要会话（新加的接口默认受保护）
+PUBLIC_PATHS = {"/api/health", "/api/login", "/api/logout", "/login"}
 
 
 @asynccontextmanager
@@ -38,6 +44,11 @@ async def lifespan(_app: FastAPI):
         log.error("数据目录 %s 对当前用户 uid=%s gid=%s 不可写：把宿主机上的 data 目录 chown 给这个 uid/gid，"
                   "或在 compose 里把 PUID/PGID 改成目录主人的", DATA_DIR, os.getuid(), os.getgid())
         raise SystemExit(1)
+    try:
+        auth.ensure()
+    except PasswordError:
+        log.error("环境变量 COLASEEDGROUP_PASSWORD 太短：至少 8 位")
+        raise SystemExit(1) from None
     cfg = store.load()
     log.info("可乐保种组 Docker 版 %s 启动，每 %s 分钟对齐一次", VERSION, cfg["interval"])
     if os.environ.get("COLASEEDGROUP_NO_SCHEDULER") != "1":
@@ -57,10 +68,125 @@ def _require_json(request: Request) -> None:
         raise HTTPException(415, "需要 application/json")
 
 
+def _cookie_secure(request: Request) -> bool:
+    """COLASEEDGROUP_COOKIE_SECURE=auto|1|0。auto：服务自己看到的请求是 https 才加 Secure。
+
+    反向代理（Caddy / Nginx）把 https 转成 http 发进来时 auto 不加 Secure——Cookie 照样能在 https 下用；
+    想在这种情况下也加 Secure，设成 1（之后只能经 https 登录）。
+    """
+    mode = os.environ.get("COLASEEDGROUP_COOKIE_SECURE", "auto").strip().lower()
+    if mode in ("1", "true", "yes", "on"):
+        return True
+    if mode in ("0", "false", "no", "off"):
+        return False
+    return request.url.scheme == "https"
+
+
+def _client_key(request: Request) -> str:
+    # 只用于登录失败计数（内存里），不写日志。反向代理后面大家共用代理的地址，等于只剩全局限速。
+    return request.client.host if request.client else "-"
+
+
+def _issue_cookie(response: Response, request: Request, token: str) -> None:
+    response.set_cookie(COOKIE, token, max_age=SESSION_TTL, path="/", httponly=True, samesite="strict",
+                        secure=_cookie_secure(request))
+
+
+def _page(name: str) -> FileResponse:
+    return FileResponse(BASE / "templates" / name, media_type="text/html; charset=utf-8",
+                        headers={"Cache-Control": "no-store"})
+
+
+@app.middleware("http")
+async def require_session(request: Request, call_next):
+    path = request.url.path
+    if path not in PUBLIC_PATHS and not auth.valid(request.cookies.get(COOKIE)):
+        if path.startswith("/api/"):
+            return JSONResponse({"error": {"code": "login_required"}}, status_code=401,
+                                headers={"Cache-Control": "no-store"})
+        return RedirectResponse("/login", status_code=303)
+    return await call_next(request)
+
+
+async def _json_body(request: Request) -> dict:
+    _require_json(request)
+    try:
+        body = await request.json()
+    except ValueError:
+        raise HTTPException(400, "不是合法 JSON") from None
+    if not isinstance(body, dict):
+        raise HTTPException(400, "必须是 JSON 对象")
+    return body
+
+
+def _throttled(retry: int) -> JSONResponse:
+    return JSONResponse({"error": {"code": "too_many_attempts", "retry_after": retry}}, status_code=429,
+                        headers={"Retry-After": str(retry)})
+
+
 @app.get("/")
 def index() -> FileResponse:
-    return FileResponse(BASE / "templates" / "index.html", media_type="text/html; charset=utf-8",
-                        headers={"Cache-Control": "no-store"})
+    return _page("index.html")
+
+
+@app.get("/login")
+def login_page(request: Request) -> Response:
+    if auth.valid(request.cookies.get(COOKIE)):
+        return RedirectResponse("/", status_code=303)
+    return _page("login.html")
+
+
+@app.post("/api/login")
+async def login(request: Request):
+    body = await _json_body(request)
+    key = _client_key(request)
+    retry = auth.throttle.retry_after(key)
+    if retry:
+        return _throttled(retry)
+    password = body.get("password")
+    if not isinstance(password, str) or not auth.check(password):
+        auth.throttle.failed(key)
+        log.info("面板登录失败：密码不对")
+        retry = auth.throttle.retry_after(key)
+        if retry:
+            return _throttled(retry)
+        return JSONResponse({"error": {"code": "wrong_password"}}, status_code=401)
+    auth.throttle.succeeded(key)
+    response = JSONResponse({"ok": True})
+    _issue_cookie(response, request, auth.new_session())
+    return response
+
+
+@app.post("/api/logout")
+def logout(request: Request):
+    _require_json(request)
+    auth.end_session(request.cookies.get(COOKIE))
+    response = JSONResponse({"ok": True})
+    response.delete_cookie(COOKIE, path="/", httponly=True, samesite="strict", secure=_cookie_secure(request))
+    return response
+
+
+@app.post("/api/password")
+async def change_password(request: Request):
+    body = await _json_body(request)
+    key = _client_key(request)
+    retry = auth.throttle.retry_after(key)
+    if retry:
+        return _throttled(retry)
+    current, new = body.get("current"), body.get("new")
+    if not isinstance(current, str) or not isinstance(new, str) or len(current) > MAX_PASSWORD:
+        return JSONResponse({"error": {"code": "invalid"}}, status_code=422)
+    try:
+        token = auth.change_password(current, new)
+    except PasswordError as err:
+        if err.code == "wrong_password":
+            auth.throttle.failed(key)
+            return JSONResponse({"error": {"code": err.code}}, status_code=403)
+        return JSONResponse({"error": {"code": err.code}}, status_code=409 if err.code == "password_from_env" else 422)
+    auth.throttle.succeeded(key)
+    response = JSONResponse({"ok": True})
+    _issue_cookie(response, request, token)
+    return response
 
 
 @app.get("/api/health")
@@ -75,20 +201,18 @@ def status() -> dict:
                        running=runner.running, next_run_at=runner.next_run_at, missing=missing_fields(cfg))
 
 
+def _config_view(cfg: dict) -> dict:
+    return {**public_view(cfg), "password_from_env": auth.from_env}
+
+
 @app.get("/api/config")
 def get_config() -> dict:
-    return public_view(store.load())
+    return _config_view(store.load())
 
 
 @app.post("/api/config")
 async def set_config(request: Request):
-    _require_json(request)
-    try:
-        body = await request.json()
-    except ValueError:
-        raise HTTPException(400, "不是合法 JSON") from None
-    if not isinstance(body, dict):
-        raise HTTPException(400, "配置必须是 JSON 对象")
+    body = await _json_body(request)
     try:
         cfg, notes = merge_update(store.load(), body)
         cfg = store.save(cfg)
@@ -96,7 +220,7 @@ async def set_config(request: Request):
         return JSONResponse({"error": {"code": err.code, "field": err.field}}, status_code=422)
     log.info("配置已保存")
     runner.wake()
-    return {**public_view(cfg), "notes": notes}
+    return {**_config_view(cfg), "notes": notes}
 
 
 @app.post("/api/run")

@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>登录 · 可乐保种组</title>
+<style>
+  :root {
+    --bg: #f6f6f4; --card: #ffffff; --fg: #1d1d1b; --muted: #6b6b66; --line: #e3e2dd;
+    --accent: #b3261e; --err-bg: #fde8e6; --err-fg: #9b1c14; --warn-bg: #fff4dc; --warn-fg: #7a5200;
+    --on-accent: #ffffff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #151514; --card: #1f1f1d; --fg: #ecebe6; --muted: #a09f98; --line: #34332f;
+      --accent: #ff7a6e; --err-bg: #3d1a17; --err-fg: #ffaaa2; --warn-bg: #3a2d0e; --warn-fg: #f2c86b;
+      --on-accent: #1d0d0b;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+         font: 14px/1.55 system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; }
+  main { max-width: 400px; margin: 0 auto; padding: 12vh 16px 48px; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .muted { color: var(--muted); }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 18px 16px; margin-top: 16px; }
+  label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 3px; }
+  input { width: 100%; font: inherit; padding: 8px 10px; border-radius: 8px;
+          border: 1px solid var(--line); background: var(--bg); color: var(--fg); }
+  button { font: inherit; border-radius: 8px; padding: 8px 14px; cursor: pointer; width: 100%; margin-top: 14px;
+           background: var(--accent); border: 1px solid var(--accent); color: var(--on-accent); }
+  button:disabled { opacity: .55; cursor: default; }
+  button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .alert { border-radius: 8px; padding: 9px 12px; margin-top: 12px; }
+  .alert.err { background: var(--err-bg); color: var(--err-fg); }
+  .alert.warn { background: var(--warn-bg); color: var(--warn-fg); }
+  .hint { font-size: 12px; color: var(--muted); margin-top: 14px; }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>可乐保种组 <span class="muted" style="font-weight:400">· Docker 版</span></h1>
+  <div class="muted">登录后才能查看状态、修改设置。</div>
+  <form class="card" id="login">
+    <label for="password">登录密码</label>
+    <input id="password" name="password" type="password" autocomplete="current-password" required autofocus>
+    <div id="msg" role="alert" hidden></div>
+    <button type="submit" id="go">登录</button>
+  </form>
+  <p class="hint">第一次启动时，初始密码只在容器日志里显示一次：<code>docker logs colaseedgroup-docker</code>，找「初始登录密码」。</p>
+  <p class="hint">忘了密码：删掉数据目录里的 <code>auth.json</code>（容器里是 <code>/data/auth.json</code>），重启容器，日志里会显示一个新的初始密码。用环境变量 <code>COLASEEDGROUP_PASSWORD</code> 设的密码请直接改环境变量。</p>
+</main>
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+let timer = null;
+
+function show(cls, text) {
+  const m = $("msg");
+  m.className = "alert " + cls;
+  m.textContent = text;
+  m.hidden = false;
+}
+
+function wait(seconds) {
+  clearInterval(timer);
+  let left = seconds;
+  $("go").disabled = true;
+  const tick = () => {
+    if (left <= 0) { clearInterval(timer); $("go").disabled = false; $("msg").hidden = true; return; }
+    show("warn", `错误次数太多，请 ${left} 秒后再试。`);
+    left -= 1;
+  };
+  tick();
+  timer = setInterval(tick, 1000);
+}
+
+$("login").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  $("go").disabled = true;
+  try {
+    const r = await fetch("/api/login", {method: "POST", headers: {"Content-Type": "application/json"},
+                                         body: JSON.stringify({password: $("password").value})});
+    const body = await r.json().catch(() => ({}));
+    if (r.ok) { location.replace("/"); return; }
+    const err = body.error || {};
+    $("password").value = "";
+    $("password").focus();
+    if (r.status === 429) { wait(err.retry_after || 5); return; }
+    show("err", r.status === 401 ? "密码不对。" : "登录失败：" + (err.code || r.status));
+  } catch (e) {
+    show("err", "连不上服务：" + e.message);
+  }
+  $("go").disabled = false;
+});
+</script>
+</body>
+</html>

@@ -72,8 +72,13 @@ class ApiTests(unittest.TestCase):
         from fastapi.testclient import TestClient
 
         import app.main as main
+        from app.auth import Auth
         main.store.__init__(pathlib.Path(cls.tmp.name))
+        main.auth = Auth(pathlib.Path(cls.tmp.name))
+        password = main.auth.ensure()
         cls.client = TestClient(main.app)
+        r = cls.client.post("/api/login", json={"password": password})
+        assert r.status_code == 200, r.text
 
     @classmethod
     def tearDownClass(cls):
