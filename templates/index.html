@@ -42,7 +42,16 @@
   th { font-size: 12px; color: var(--muted); font-weight: 500; }
   td.num, th.num { text-align: right; }
   table.assign td.wrap { white-space: normal; overflow-wrap: anywhere; word-break: break-word; }
-  table.assign td.name { min-width: 10em; }
+  table.assign td.name { min-width: 12em; }
+  table.assign td.ops { white-space: nowrap; }
+  button.small { padding: 3px 10px; font-size: 13px; }
+  .filters { margin-top: 10px; }
+  .filters button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+  .pager { justify-content: center; margin-top: 10px; }
+  #action-msg { min-height: 1.5em; margin-top: 6px; }
+  dialog { border: 1px solid var(--line); border-radius: 12px; background: var(--card); color: var(--fg);
+           max-width: min(480px, calc(100vw - 32px)); padding: 18px; }
+  dialog::backdrop { background: rgba(0, 0, 0, .45); }
   table.assign td.local { min-width: 7em; }
   table.assign td.action { min-width: 5em; }
   a { color: var(--accent); }
@@ -101,17 +110,39 @@
     <ul class="plain" id="skipped"></ul>
   </section>
 
-  <section class="card">
-    <h2 id="assign-summary">全部派单</h2>
+  <section class="card" aria-labelledby="assign-summary">
+    <div class="row" style="justify-content:space-between">
+      <h2 id="assign-summary" style="margin:0">全部派单</h2>
+      <button id="retry-all" type="button" hidden title="清掉所有加种失败的退避，马上同步一次">全部重试加种</button>
+    </div>
+    <div class="row filters" role="group" aria-label="筛选派单" id="filters"></div>
+    <div id="action-msg" class="muted" role="status" aria-live="polite"></div>
     <div class="scroll">
       <table class="assign">
-        <thead><tr><th>种子名</th><th class="num">体积</th><th>站点要求</th><th>本地情况</th><th>下载器</th></tr></thead>
-        <tbody id="assignments"><tr><td colspan="5" class="muted">加载中…</td></tr></tbody>
+        <thead><tr><th>种子名</th><th class="num">体积</th><th>站点要求</th><th>本地情况</th><th>下载器</th><th>操作</th></tr></thead>
+        <tbody id="assignments"><tr><td colspan="6" class="muted">加载中…</td></tr></tbody>
       </table>
     </div>
+    <nav class="row pager" aria-label="翻页" id="pager" hidden>
+      <button type="button" id="pg-prev">上一页</button>
+      <span id="pg-info" aria-live="polite"></span>
+      <button type="button" id="pg-next">下一页</button>
+    </nav>
     <p class="hint">这里只是下载器这一侧的情况；tracker 有没有把它算作做种，以站点<a id="sg-link" href="https://www.colapt.com/account/seed-group" target="_blank" rel="noopener noreferrer">保种组页面</a>为准。
-      只有「插件管理」的种子（本服务加的、带专用标签、在专用目录里）会在站点收回派单时被删除；下载器里已有的同一颗种子、你自己的种子、别站的种子都不会被碰。</p>
+      只有「插件管理」的种子（本服务加的或你确认接管的、带专用标签）会在站点收回派单时被删除；下载器里已有的同一颗种子、你自己的种子、别站的种子都不会被碰。</p>
   </section>
+
+  <dialog id="confirm" aria-labelledby="confirm-title">
+    <form method="dialog">
+      <h2 id="confirm-title">接管这颗种子？</h2>
+      <p id="confirm-name" class="mono" style="overflow-wrap:anywhere"></p>
+      <p id="confirm-text"></p>
+      <div class="row" style="justify-content:flex-end">
+        <button value="cancel" type="submit">取消</button>
+        <button value="ok" type="submit" class="primary" id="confirm-ok">确认接管</button>
+      </div>
+    </form>
+  </dialog>
 
   <section class="card">
     <details id="cfg-details">
@@ -254,21 +285,85 @@ function renderStatus(s) {
   $("skipped-card").hidden = !sk.length;
   $("skipped").innerHTML = sk.map((e) => `<li>${esc(e.text)} × ${e.count} <code>${esc(e.code)}</code></li>`).join("");
 
-  // 行、顺序、文案都由执行器给出（与 MoviePilot 插件页一致），这里只排版
-  const rows = s.assignments;
-  $("assign-summary").textContent = rows ? s.assignment_summary_text : "全部派单";
-  const empty = (t) => `<tr><td colspan="5" class="muted">${esc(t)}</td></tr>`;
-  let html;
-  if (!rows) html = empty(!last ? "还没有运行过" : (last.status === "ok" ? "下一轮运行后显示全部派单" : "还没有拿到派单"));
-  else if (!rows.length) html = empty("站点暂时没有派单");
-  else html = rows.map((r) => `<tr>
-      <td class="wrap name">${esc(r.name)}</td><td class="num">${esc(r.size_text)}</td>
-      <td class="wrap action">${esc(r.action_text)}</td><td class="wrap local">${esc(r.local_text)}</td>
-      <td>${esc(r.downloader || "—")}</td></tr>`).join("");
-  if (s.assignments_truncated) html += empty(`还有 ${s.assignments_truncated} 条未列出`);
-  $("assignments").innerHTML = html;
+  renderAssignments(s);
   $("run").disabled = s.running || !s.configured;
 }
+
+// ---------------- 派单表：筛选 + 分页 + 操作 ----------------
+// 行、顺序、文案、筛选与可做的操作都由执行器给出（与 MoviePilot 插件页一致），这里只排版
+const PAGE = 50;
+const view = {filter: null, page: 1, sig: "", fsig: "", rows: null, warning: ""};
+function renderAssignments(s) {
+  const rows = s.assignments;
+  view.rows = rows; view.warning = s.takeover_warning;
+  $("assign-summary").textContent = rows ? s.assignment_summary_text : "全部派单";
+  $("retry-all").hidden = !(rows || []).some((r) => r.ops.some((o) => o.action === "retry"));
+  if (view.filter === null && rows) view.filter = s.default_filter;
+  const counts = {all: (rows || []).length, problem: 0, pending: 0};
+  for (const r of rows || []) if (r.filter) counts[r.filter] += 1;
+  const f = view.filter || "all";
+  const fhtml = rows ? s.filters.map((x) => `<button type="button" class="small" data-filter="${esc(x.key)}"
+      aria-pressed="${x.key === f}">${esc(x.text)}（${counts[x.key]}）</button>`).join("") : "";
+  if (fhtml !== view.fsig) { $("filters").innerHTML = fhtml; view.fsig = fhtml; }
+  const shown = (rows || []).filter((r) => f === "all" || r.filter === f);
+  const pages = Math.max(1, Math.ceil(shown.length / PAGE));
+  view.page = Math.min(Math.max(1, view.page), pages);
+  const slice = shown.slice((view.page - 1) * PAGE, view.page * PAGE);
+  const empty = (t) => `<tr><td colspan="6" class="muted">${esc(t)}</td></tr>`;
+  const EMPTY = {problem: "没有异常的派单", pending: "没有待加种的派单", all: "站点暂时没有派单"};
+  let html;
+  if (!rows) html = empty(!s.last ? "还没有运行过" : (s.last.status === "ok" ? "下一轮运行后显示全部派单" : "还没有拿到派单"));
+  else if (!slice.length) html = empty(EMPTY[f]);
+  else html = slice.map((r) => `<tr>
+      <td class="wrap name">${esc(r.name)}</td><td class="num">${esc(r.size_text)}</td>
+      <td class="wrap action">${esc(r.action_text)}</td><td class="wrap local">${esc(r.local_text)}</td>
+      <td>${esc(r.downloader || "—")}</td>
+      <td class="ops">${r.ops.map((o) => `<button type="button" class="small" data-act="${esc(o.action)}"
+        data-tid="${esc(r.torrent_id)}" aria-label="${esc(o.text)}：${esc(r.name)}">${esc(o.text)}</button>`).join(" ")}</td></tr>`).join("");
+  if (s.assignments_truncated) html += empty(`还有 ${s.assignments_truncated} 条未列出`);
+  // 每 5 秒刷新一次状态：内容没变就不重画，免得键盘焦点被打断
+  const sig = f + "|" + view.page + "|" + html;
+  if (sig !== view.sig) { $("assignments").innerHTML = html; view.sig = sig; }
+  $("pager").hidden = pages <= 1;
+  $("pg-info").textContent = `第 ${view.page} / ${pages} 页（共 ${shown.length} 条）`;
+  $("pg-prev").disabled = view.page <= 1;
+  $("pg-next").disabled = view.page >= pages;
+}
+function rerender() { view.sig = ""; refresh(); }
+$("filters").addEventListener("click", (ev) => {
+  const b = ev.target.closest("button[data-filter]");
+  if (!b) return;
+  view.filter = b.dataset.filter; view.page = 1; view.fsig = ""; rerender();
+  setTimeout(() => { const n = $("filters").querySelector(`[data-filter="${view.filter}"]`); if (n) n.focus(); }, 300);
+});
+$("pg-prev").onclick = () => { view.page -= 1; rerender(); };
+$("pg-next").onclick = () => { view.page += 1; rerender(); };
+
+async function act(body) {
+  $("action-msg").textContent = "处理中…";
+  try {
+    const r = await fetch("/api/action", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
+    if (r.status === 401) { location.replace("/login"); return; }
+    const j = await r.json().catch(() => ({}));
+    $("action-msg").textContent = j.message || ((j.error && j.error.code) ? "没有执行：" + j.error.code : "没有执行");
+  } catch (e) { $("action-msg").textContent = "连不上服务：" + e.message; }
+  setTimeout(rerender, 800);
+}
+$("assignments").addEventListener("click", (ev) => {
+  const b = ev.target.closest("button[data-act]");
+  if (!b) return;
+  const tid = Number(b.dataset.tid);
+  if (b.dataset.act !== "takeover") { act({action: b.dataset.act, torrent_id: tid}); return; }
+  const row = (view.rows || []).find((r) => r.torrent_id === tid && r.ops.some((o) => o.action === "takeover"));
+  const dlg = $("confirm");
+  $("confirm-name").textContent = row ? row.name : "#" + tid;
+  $("confirm-text").textContent = view.warning;
+  dlg.returnValue = "";
+  dlg.onclose = () => { if (dlg.returnValue === "ok") act({action: "takeover", torrent_id: tid, confirm: true}); b.focus(); };
+  dlg.showModal();
+  $("confirm-ok").focus();
+});
+$("retry-all").onclick = () => act({action: "retry"});
 
 function dlRow(d = {}) {
   const node = $("dl-row").content.firstElementChild.cloneNode(true);

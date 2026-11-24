@@ -28,6 +28,8 @@ DEFAULT_TAG = "可乐保种组"
 DEFAULT_SAVE_PATH = "/downloads/colaseedgroup"
 MIN_INTERVAL = 10
 MAX_INTERVAL = 24 * 60
+DEFAULT_INTERVAL = MIN_INTERVAL   # 默认就按最短间隔跑（站点每 10 分钟派一次单）
+DEFAULT_MAX_ADDS = 10
 SUPPORTED_TYPES = ("qbittorrent", "transmission")
 MAX_DOWNLOADERS = 8
 _INSTANCE_RE = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
@@ -41,8 +43,8 @@ DEFAULTS: Dict[str, Any] = {
     "downloaders": [],
     "save_path": DEFAULT_SAVE_PATH,
     "tag": DEFAULT_TAG,
-    "interval": 30,
-    "max_adds": 5,
+    "interval": DEFAULT_INTERVAL,
+    "max_adds": DEFAULT_MAX_ADDS,
     "max_deletes": 5,
     "delete_files": True,
 }
@@ -134,8 +136,8 @@ def normalize(raw: Dict[str, Any]) -> Dict[str, Any]:
     if "," in tag or len(tag) > 64:
         raise ConfigError("tag", "invalid")
     cfg["tag"] = tag
-    cfg["interval"] = _int(raw.get("interval"), 30, MIN_INTERVAL, MAX_INTERVAL)
-    cfg["max_adds"] = _int(raw.get("max_adds"), 5, 0, HARD_MAX_ADDS)
+    cfg["interval"] = _int(raw.get("interval"), DEFAULT_INTERVAL, MIN_INTERVAL, MAX_INTERVAL)
+    cfg["max_adds"] = _int(raw.get("max_adds"), DEFAULT_MAX_ADDS, 0, HARD_MAX_ADDS)
     cfg["max_deletes"] = _int(raw.get("max_deletes"), 5, 0, HARD_MAX_DELETES)
     cfg["delete_files"] = bool(raw.get("delete_files", True))
     downloaders: List[Dict[str, Any]] = []

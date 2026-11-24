@@ -13,7 +13,7 @@ from typing import Any, Callable, Dict, List, Optional
 from . import downloaders as downloaders_mod
 from .config import Store, missing_fields
 from .seedgroup import VERSION
-from .seedgroup.engine import Engine, Settings
+from .seedgroup.engine import ACTION_RESULT_TEXT, Actions, Engine, Settings
 from .seedgroup.site import Assignment, SiteClient
 
 log = logging.getLogger("colaseedgroup")
@@ -45,6 +45,34 @@ class Runner:
     @property
     def running(self) -> bool:
         return self._lock.locked()
+
+    def act(self, action: str, torrent_id: Any = None) -> Dict[str, Any]:
+        """面板上的手动操作（retry / resume / takeover）。与同步共用一把锁：同步进行中不动账本。
+        规则全在搬来的 ``Actions`` 里（复核、只动所选下载器、幂等）；成功后马上同步一次。"""
+        cfg = self.store.load()
+        if missing_fields(cfg):
+            return {"ok": False, "code": "not_configured", "message": "还没配置好"}
+        if not self._lock.acquire(blocking=False):
+            return {"ok": False, "code": "busy", "message": ACTION_RESULT_TEXT["busy"]}
+        try:
+            actions = Actions(self._build(cfg["downloaders"]) if action != "retry" else [],
+                              Settings(save_path=cfg["save_path"], tag=cfg["tag"], delete_files=cfg["delete_files"]),
+                              self.store.load_state(), self.store.save_state, log=log)
+            rows = self.store.load_last_run().get("assignments") or []
+            if action == "retry":
+                result = actions.retry(rows, torrent_id)
+            elif action == "resume":
+                result = actions.resume(rows, torrent_id)
+            else:
+                result = actions.take_over(rows, torrent_id)
+        finally:
+            self._lock.release()
+        if result.get("code") in ("retried", "retried_all", "resumed", "rechecking", "taken_over"):
+            self.wake()
+            result = {**result, "message": result["message"] + "；马上同步一次"}
+        elif not result.get("ok"):
+            log.info("[可乐保种组] 手动操作未执行：%s", result.get("code"))
+        return result
 
     def run_cycle(self, trigger: str = "schedule") -> Dict[str, Any]:
         cfg = self.store.load()

@@ -2,7 +2,8 @@
 
 搬来的 ``app/seedgroup/clients.py``（插件原文）包的是 MoviePilot 的 ``Qbittorrent`` / ``Transmission``
 实例：只调用 ``qbc`` / ``trc``、``reconnect()``、``get_torrents()``、``add_torrent()`` /
-``add_torrent_with_status()``、``delete_torrents()`` 这几样。这里用 MoviePilot 用的同一套库
+``add_torrent_with_status()``、``delete_torrents()``，以及面板手动操作用的 ``start_torrents()`` /
+``recheck_torrents()`` / ``set_torrents_tag()``（qB）/ ``set_torrent_tag()``（TR）这几样。这里用 MoviePilot 用的同一套库
 （qbittorrent-api、transmission-rpc）实现同样的几样，执行器逻辑一行不改。
 
 日志只写下载器的名字和异常类型：不写地址、用户名、密码，也不写异常原文（库的异常里常带 URL）。
@@ -91,6 +92,30 @@ class QbInstance:
         except Exception as err:
             log.warning("下载器 %s 删种失败：%s", self.name, type(err).__name__)
             return False
+
+    def _call(self, what: str, func: Any, **kwargs: Any) -> bool:
+        if not self.qbc:
+            return False
+        try:
+            func(**kwargs)
+            return True
+        except Exception as err:
+            log.warning("下载器 %s %s失败：%s", self.name, what, type(err).__name__)
+            return False
+
+    def start_torrents(self, ids: Any) -> bool:
+        if not self.qbc:
+            return False
+        # qB 5.x 叫 start，4.x 叫 resume；qbittorrent-api 两个名字都有
+        func = getattr(self.qbc, "torrents_start", None) or self.qbc.torrents_resume
+        return self._call("恢复种子", func, torrent_hashes=ids)
+
+    def recheck_torrents(self, ids: Any) -> bool:
+        return self._call("重新校验", self.qbc.torrents_recheck if self.qbc else None, torrent_hashes=ids)
+
+    def set_torrents_tag(self, ids: Any, tags: List[str]) -> bool:
+        """追加标签（qB 的 addTags 本来就保留原有标签）。"""
+        return self._call("打标签", self.qbc.torrents_add_tags if self.qbc else None, tags=tags, torrent_hashes=ids)
 
 
 def _parse_add(ret: Any) -> Tuple[bool, List[str]]:
@@ -187,6 +212,28 @@ class TrInstance:
         except Exception as err:
             log.warning("下载器 %s 删种失败：%s", self.name, type(err).__name__)
             return False
+
+    def _call(self, what: str, method: str, *args: Any, **kwargs: Any) -> bool:
+        if not self.trc:
+            return False
+        try:
+            getattr(self.trc, method)(*args, **kwargs)
+            return True
+        except Exception as err:
+            log.warning("下载器 %s %s失败：%s", self.name, what, type(err).__name__)
+            return False
+
+    def start_torrents(self, ids: Any) -> bool:
+        return self._call("恢复种子", "start_torrent", ids)
+
+    def recheck_torrents(self, ids: Any) -> bool:
+        return self._call("重新校验", "verify_torrent", ids)
+
+    def set_torrent_tag(self, ids: Any, tags: List[str], org_tags: Optional[List[str]] = None) -> bool:
+        """TR 的 labels 整组覆盖：与原有标签合并后写回（同 MoviePilot）。"""
+        if not tags:
+            return False
+        return self._call("打标签", "change_torrent", ids, labels=sorted(set((org_tags or []) + list(tags))))
 
 
 def build(downloaders: List[dict]) -> List[Any]:

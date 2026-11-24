@@ -107,6 +107,7 @@ class FakeQbc:
     def __init__(self):
         self.rows = []
         self.deleted = []
+        self.calls = []
         self.fail_list = False
 
     def torrents_info(self):
@@ -127,6 +128,21 @@ class FakeQbc:
     def torrents_delete(self, delete_files, torrent_hashes):
         self.deleted.append((torrent_hashes, delete_files))
         self.rows = [r for r in self.rows if r["hash"] != torrent_hashes]
+
+    def _row(self, h):
+        return next(r for r in self.rows if r["hash"] == h)
+
+    def torrents_start(self, torrent_hashes):
+        self.calls.append(("start", torrent_hashes))
+        self._row(torrent_hashes)["state"] = "downloading"
+
+    def torrents_recheck(self, torrent_hashes):
+        self.calls.append(("recheck", torrent_hashes))
+
+    def torrents_add_tags(self, tags, torrent_hashes):
+        self.calls.append(("tag", torrent_hashes, tuple(tags)))
+        row = self._row(torrent_hashes)
+        row["tags"] = ",".join([t for t in row["tags"].split(",") if t] + list(tags))
 
     def app_preferences(self):
         return {"up_limit": 0, "dl_limit": 0, "alt_up_limit": 0, "alt_dl_limit": 0}

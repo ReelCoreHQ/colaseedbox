@@ -110,6 +110,16 @@ class ApiTests(unittest.TestCase):
     def test_run_requires_json(self):
         self.assertEqual(self.client.post("/api/run").status_code, 415)
 
+    def test_action_endpoint_validates(self):
+        self.assertEqual(self.client.post("/api/action", content="{}", headers={"Content-Type": "text/plain"}).status_code,
+                         415)
+        for body in ({"action": "nuke", "torrent_id": 1}, {"action": "resume"}, {"action": "resume", "torrent_id": "1"},
+                     {"action": "takeover", "torrent_id": 1}, {"action": "takeover", "torrent_id": 1, "confirm": "yes"}):
+            self.assertEqual(self.client.post("/api/action", json=body).status_code, 422, body)
+        r = self.client.post("/api/action", json={"action": "retry"})
+        self.assertIn(r.status_code, (200, 409))
+        self.assertIn("message", r.json())
+
     def test_index_served(self):
         r = self.client.get("/")
         self.assertEqual(r.status_code, 200)

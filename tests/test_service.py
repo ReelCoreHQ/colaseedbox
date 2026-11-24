@@ -211,14 +211,19 @@ class Box(unittest.TestCase):
         self.assertEqual(self.runner.run_cycle()["status"], "ok")
         st = self.status()
         self.assertEqual(st["assignment_summary_text"], "派单 5 · 插件管理 2 · 非插件管理 1 · 待加种 1 · 退避 0 · 收回 1")
-        got = [(r["name"], r["action_text"], r["local_text"], r["downloader"]) for r in st["assignments"]]
+        got = [(r["name"], r["action_text"], r["local_text"], r["downloader"], [o["action"] for o in r["ops"]])
+               for r in st["assignments"]]
         self.assertEqual(got, [
-            ("#4", "收回", "收回且下载器里已没有", ""),
-            ("#5", "新派", "待加种（派单没有下载链接）", ""),
-            ("New.Film", "新派", "本轮已加", "qb1"),
-            ("Theirs.Film", "保持", "已在下载器（非插件管理）·做种中", "qb1"),
-            ("站点给的名字", "保持", "插件管理·下载中 0%", "qb1"),
+            ("#5", "新派", "待加种（派单没有下载链接）", "", []),
+            ("#4", "收回", "站点已收回，下载器里已没有", "", []),
+            ("New.Film", "新派", "本轮已加", "qb1", []),
+            ("Theirs.Film", "保持", "已在下载器（非插件管理）·做种中", "qb1", ["takeover"]),
+            ("站点给的名字", "保持", "插件管理·下载中 0%", "qb1", []),
         ])
+        self.assertEqual([r["filter"] for r in st["assignments"]], ["pending", "", "", "", ""])
+        self.assertEqual(st["default_filter"], "all")
+        self.assertEqual([f["text"] for f in st["filters"]], ["异常", "待加种", "全部"])
+        self.assertIn("连同文件一起删除", st["takeover_warning"])
         self.assertEqual(st["assignments"][2]["size_text"], "1.0 KiB")
         blob = json.dumps(st, ensure_ascii=False)
         for h in (mine, theirs, new, gone, later):
@@ -226,10 +231,67 @@ class Box(unittest.TestCase):
         self.assertNotIn("http", blob)
         self.assertNotIn(SIGNED, self.everything_written(sess))
 
+    # ---------------- 面板上的手动操作 ----------------
+    def seed_actions(self):
+        mine = self.own("Mine.Film", 1)
+        self.qb.qbc._row(mine)["state"] = "pausedDL"
+        _, theirs = make_torrent("Theirs.Film")
+        self.qb.qbc.rows.append({"hash": theirs, "name": "Theirs.Film", "save_path": "/media", "tags": "",
+                                 "content_path": "/media/Theirs.Film", "progress": 1, "state": "uploading"})
+        data, failed = make_torrent("Failed.Film")
+        sess = self.session({"/assignment": Rsp(200, assignment([item(mine, 1, "keep"), item(theirs, 2, "keep"),
+                                                                 item(failed, 3, "add", url=f"{SITE}/gone")])),
+                             "/gone": Rsp(404, {}), "/state": Rsp(200, {"ok": True})})
+        self.assertEqual(self.runner.run_cycle()["status"], "ok")
+        return mine, theirs, failed, sess
+
+    def test_actions_resume_retry_and_refusals(self):
+        mine, theirs, failed, _ = self.seed_actions()
+        st = self.status()
+        self.assertEqual(st["default_filter"], "problem")
+        ops = {r["name"]: [o["action"] for o in r["ops"]] for r in st["assignments"]}
+        self.assertEqual(ops, {"Mine.Film": ["resume"], "Theirs.Film": ["takeover"], "#3": ["retry"]})
+        r = self.runner.act("resume", 2)                       # 不是本服务的：拒绝，碰都不碰
+        self.assertEqual((r["ok"], r["code"]), (False, "not_owned"))
+        self.assertEqual(self.qb.qbc.calls, [])
+        self.assertEqual(self.runner.act("resume", 1)["code"], "resumed")
+        self.assertEqual(self.qb.qbc.calls, [("start", mine)])
+        self.assertIn(failed, self.store.load_state()["backoff"])
+        self.assertEqual(self.runner.act("retry", 3)["code"], "retried")
+        self.assertNotIn(failed, self.store.load_state()["backoff"])
+        self.assertEqual(self.runner.act("retry")["code"], "nothing_to_retry")
+        r = self.runner.act("takeover", 1)                     # 已经是本服务的：什么都不做
+        self.assertEqual((r["ok"], r["code"]), (True, "already_owned"))
+
+    def test_takeover_then_release_deletes_respecting_shared_content(self):
+        mine, theirs, failed, sess = self.seed_actions()
+        # 同一内容还被别站的辅种用着
+        self.qb.qbc.rows.append({"hash": "f" * 40, "name": "Theirs.Film", "save_path": "/media", "tags": "other",
+                                 "content_path": "/media/Theirs.Film", "progress": 1, "state": "uploading"})
+        self.assertEqual(self.runner.act("takeover", 2)["code"], "taken_over")
+        rec = self.store.load_state()["owned"][theirs]
+        self.assertTrue(rec["taken_over"])
+        self.assertIn(("tag", theirs, (TAG,)), self.qb.qbc.calls)
+        self.assertEqual(self.qb.qbc._row(theirs)["save_path"], "/media")
+        sess.routes["/assignment"] = Rsp(200, assignment([item(theirs, 2, "remove")], revision=2))
+        report = self.runner.run_cycle()
+        self.assertEqual(report["removed"], [theirs])
+        self.assertEqual(self.qb.qbc.deleted, [(theirs, False)])   # 共用内容：只删种子
+        self.assertEqual(json.dumps(self.status(), ensure_ascii=False).count(theirs), 0)
+
+    def test_actions_wait_for_running_sync(self):
+        self.seed_actions()
+        self.runner._lock.acquire()
+        try:
+            self.assertEqual(self.runner.act("retry")["code"], "busy")
+        finally:
+            self.runner._lock.release()
+
     def test_panel_renders_assignment_table(self):
         html = (ROOT / "templates" / "index.html").read_text("utf-8")
         for text in ("<th>种子名</th>", "<th class=\"num\">体积</th>", "<th>站点要求</th>", "<th>本地情况</th>",
-                     "<th>下载器</th>", "/account/seed-group", "s.assignment_summary_text"):
+                     "<th>下载器</th>", "<th>操作</th>", "/account/seed-group", "s.assignment_summary_text",
+                     "const PAGE = 50", "showModal", "/api/action", "aria-pressed"):
             self.assertIn(text, html)
         self.assertNotIn("info_hash", html)
 
@@ -247,6 +309,12 @@ class ConfigTests(unittest.TestCase):
     def test_limits_clamped(self):
         cfg = normalize({"max_deletes": 500, "max_adds": -3, "interval": 1})
         self.assertEqual((cfg["max_deletes"], cfg["max_adds"], cfg["interval"]), (20, 0, 10))
+
+    def test_defaults_10_minutes_10_adds_saved_values_kept(self):
+        cfg = normalize({})
+        self.assertEqual((cfg["interval"], cfg["max_adds"], cfg["max_deletes"]), (10, 10, 5))
+        cfg = normalize({"interval": 30, "max_adds": 5})          # 已保存的配置保持原值
+        self.assertEqual((cfg["interval"], cfg["max_adds"]), (30, 5))
 
     def test_rejects_bad_values(self):
         for raw in ({"save_path": "/"}, {"tag": "a,b"}, {"site_url": "ftp://x"},

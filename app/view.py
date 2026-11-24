@@ -11,7 +11,17 @@ import time
 from collections import Counter
 from typing import Any, Dict, List, Optional
 
-from .seedgroup.engine import action_text, local_text, summary_text
+from .seedgroup.engine import (
+    FILTERS,
+    ROW_ACTION_TEXT,
+    action_text,
+    default_filter,
+    local_text,
+    row_actions,
+    row_filter,
+    summary_text,
+    takeover_warning,
+)
 
 STATUS_TEXT = {
     "ok": "正常",
@@ -124,7 +134,8 @@ def _clock(ts: float) -> str:
 
 
 def assignments(last: Dict[str, Any]) -> Optional[List[Dict[str, Any]]]:
-    """派单表的行（已按执行器的顺序排好）。只给显示要用的字段：没有 info_hash、没有链接。"""
+    """派单表的行（已按执行器的顺序排好）。只给显示要用的字段与可做的操作（按 torrent_id）：
+    没有 info_hash、没有链接。"""
     rows = last.get("assignments")
     if rows is None:
         return None
@@ -137,6 +148,8 @@ def assignments(last: Dict[str, Any]) -> Optional[List[Dict[str, Any]]]:
         "local": r.get("local") or "",
         "local_text": local_text(r, _clock),
         "downloader": r.get("downloader") or "",
+        "filter": row_filter(r),
+        "ops": [{"action": "resume" if a == "recheck" else a, "text": ROW_ACTION_TEXT[a]} for a in row_actions(r)],
     } for r in rows]
 
 
@@ -191,6 +204,9 @@ def status(cfg: Dict[str, Any], state: Dict[str, Any], last: Dict[str, Any], *, 
         "missing": [{"code": m, "text": REASON_TEXT.get(m, m)} for m in missing],
         "last": summary,
         "assignments": assignments(last),
+        "filters": [{"key": k, "text": t} for k, t in FILTERS],
+        "default_filter": default_filter(last.get("assignments") or []),
+        "takeover_warning": takeover_warning(bool(cfg.get("delete_files", True))),
         "assignment_summary_text": summary_text(last.get("assignment_summary") or {}),
         "assignments_truncated": int(last.get("assignments_truncated") or 0),
         "owned_count": len(owned),

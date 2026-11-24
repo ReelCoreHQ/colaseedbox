@@ -4,6 +4,7 @@
 这里是外壳：配置、定时运行、端口 3006 上的小面板（要登录，见 auth.py）。
 """
 
+import asyncio
 import logging
 import os
 import threading
@@ -233,6 +234,25 @@ async def set_config(request: Request):
     log.info("配置已保存")
     runner.wake()
     return {**_config_view(cfg), "notes": notes}
+
+
+ACTIONS = ("retry", "resume", "takeover")
+
+
+@app.post("/api/action")
+async def manual_action(request: Request):
+    """面板上的手动操作：{action: retry|resume|takeover, torrent_id}。retry 不带 torrent_id = 全部重试；
+    takeover 必须带 confirm: true（面板先弹确认框）。"""
+    body = await _json_body(request)
+    action, tid = body.get("action"), body.get("torrent_id")
+    if action not in ACTIONS or (tid is not None and (isinstance(tid, bool) or not isinstance(tid, int))):
+        return JSONResponse({"error": {"code": "invalid"}}, status_code=422)
+    if action != "retry" and tid is None:
+        return JSONResponse({"error": {"code": "invalid"}}, status_code=422)
+    if action == "takeover" and body.get("confirm") is not True:
+        return JSONResponse({"error": {"code": "not_confirmed"}}, status_code=422)
+    result = await asyncio.to_thread(runner.act, action, tid)
+    return JSONResponse(result, status_code=200 if result.get("ok") else 409)
 
 
 @app.post("/api/run")
