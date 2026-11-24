@@ -38,7 +38,7 @@ class Runner:
         self._build = build_downloaders or downloaders_mod.build
         self._lock = threading.Lock()
         self._stop = threading.Event()      # 关停：正在跑的一轮在下一个检查点退出
-        self._wake = threading.Event()      # 立即运行 / 配置变了
+        self._wake = threading.Event()      # 立即同步 / 配置变了
         self.next_run_at: Optional[float] = None
         self._thread: Optional[threading.Thread] = None
 
@@ -94,7 +94,7 @@ class Runner:
         self._wake.set()
 
     def wake(self) -> None:
-        """立即跑一轮（面板「立即运行」、保存配置后）。"""
+        """立即跑一轮（面板「立即同步」、保存配置后）。"""
         self._wake.set()
 
     def _loop(self) -> None:

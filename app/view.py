@@ -16,7 +16,7 @@ STATUS_TEXT = {
     "no_downloader": "没有可用的下载器",
     "stopped": "已中止（服务关停）",
     "not_configured": "未配置",
-    "busy": "上一轮还在运行",
+    "busy": "上一次同步还没结束",
 }
 
 #: 原因码（执行器 / 站点客户端 / 下载器给出的固定码）

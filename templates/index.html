@@ -71,7 +71,8 @@
     <h1>可乐保种组 <span class="muted" style="font-weight:400">· Docker 版</span></h1>
     <div class="row">
       <span class="muted" id="version"></span>
-      <button class="primary" id="run">立即运行</button>
+      <span class="muted" id="auto" role="status"></span>
+      <button class="primary" id="run" title="不等下一轮定时，马上向站点拉一次派单、对齐下载器并上报状态">立即同步</button>
     </div>
   </header>
 
@@ -129,7 +130,7 @@
             <input id="tag" name="tag">
           </div>
           <div>
-            <label for="interval">运行间隔（分钟，≥ 10）</label>
+            <label for="interval">同步间隔（分钟，≥ 10）</label>
             <input id="interval" name="interval" type="number" min="10" max="1440">
           </div>
           <div class="row" style="align-items:end">
@@ -173,7 +174,7 @@ const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const fmtTime = (t) => t ? new Date(t * 1000).toLocaleString("zh-CN", {hour12: false}) : "-";
 const ACTION = {keep: "保持", add: "新派", remove: "收回"};
-const TRIGGER = {startup: "启动后", schedule: "定时", manual: "手动"};
+const TRIGGER = {startup: "启动后同步", schedule: "定时同步", manual: "手动同步"};
 
 async function api(path, opts = {}) {
   const r = await fetch(path, {headers: {"Content-Type": "application/json"}, ...opts});
@@ -192,14 +193,14 @@ function renderStatus(s) {
     cls = "warn";
     $("cfg-details").open = true;
   } else if (!last) {
-    text = s.running ? "正在运行第一轮…" : "还没有运行过";
+    text = s.running ? "正在进行第一次同步…" : "还没有同步过";
   } else {
     text = fmtTime(last.finished_at) + " · " + (TRIGGER[last.trigger] || "") + " · " + last.status_text;
     if (last.outdated) text += `（站点要求 ≥ ${last.min_plugin_version}，当前 ${s.version}，请更新）`;
     if (last.status === "ok" && !last.state_reported) text += " · 状态上报失败";
     else if (last.status === "ok") text += " · 状态已上报";
     cls = last.status === "ok" ? (last.errors.length ? "warn" : "ok") : (["outdated", "stopped", "busy"].includes(last.status) ? "warn" : "err");
-    if (s.running) text += " · 正在运行…";
+    if (s.running) text += " · 正在同步…";
   }
   h.className = "alert " + cls;
   h.textContent = text;
@@ -211,7 +212,8 @@ function renderStatus(s) {
   $("s-addrm").textContent = last ? `${last.added} / ${last.removed}` : "-";
   $("s-gate").textContent = last && last.status === "ok" ? (last.deletes_allowed ? "删种闸门：开" : "删种闸门：关") : "";
   $("s-cap").textContent = last ? last.capacity_text : "-";
-  $("s-next").textContent = s.next_run_at ? "下一轮 " + fmtTime(s.next_run_at) : (s.running ? "运行中" : "");
+  $("s-next").textContent = s.next_run_at ? "下次同步 " + fmtTime(s.next_run_at) : (s.running ? "正在同步" : "");
+  $("auto").textContent = !s.configured ? "未配置，暂停中" : (s.running ? "正在同步…" : `自动同步中 · 每 ${s.interval} 分钟`);
 
   const errs = last ? last.errors : [];
   $("errors-card").hidden = !errs.length;
@@ -266,7 +268,7 @@ async function save(ev) {
     const c = await api("/api/config", {method: "POST", body: JSON.stringify(body)});
     fillConfig(c);
     const notes = (c.notes || []).map((n) => NOTE[n] || (n.startsWith("password_cleared:") ? `下载器 ${n.split(":")[1]} 改了地址或用户名，密码已清除，请重填` : n));
-    $("toast").textContent = "已保存，马上运行一轮。" + notes.join("；");
+    $("toast").textContent = "已保存，马上同步一次。" + notes.join("；");
     refresh();
   } catch (e) {
     const err = (e.body && e.body.error) || {};
