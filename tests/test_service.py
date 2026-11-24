@@ -190,9 +190,48 @@ class Box(unittest.TestCase):
                                   "action_counts": {"keep": 2}, "skipped": {"c" * 40: "external"}})
         st = self.status()
         self.assertEqual((st["owned_count"], st["owned_total_text"]), (2, "112 MiB"))
-        self.assertEqual([r["size_text"] for r in st["owned"]], ["64.0 MiB", "48.0 MiB"])
         self.assertEqual(st["last"]["capacity_text"], "2.0 TiB")
         self.assertEqual(st["last"]["skipped"][0]["code"], "external")
+        self.assertIsNone(st["assignments"])   # 老版本留下的 last_run 没有快照
+
+    def test_status_lists_every_assignment_by_name_without_hash(self):
+        mine = self.own("Mine.Film", 1)
+        _, theirs = make_torrent("Theirs.Film")
+        self.qb.qbc.rows.append({"hash": theirs, "name": "Theirs.Film", "save_path": "/downloads/mine",
+                                 "content_path": "/downloads/mine/Theirs.Film", "tags": "", "progress": 1,
+                                 "state": "uploading"})
+        data, new = make_torrent("New.Film")
+        _, gone = make_torrent("Gone.Film")
+        _, later = make_torrent("Later.Film")
+        items = [item(mine, 1, "keep"), item(theirs, 2, "keep"), item(new, 3, "add"), item(gone, 4, "remove"),
+                 item(later, 5, "add", url="")]
+        items[0]["name"] = "站点给的名字"
+        sess = self.session({"/assignment": Rsp(200, assignment(items)), "3-" + SIGNED: Rsp(200, content=data),
+                             "/state": Rsp(200, {"ok": True})})
+        self.assertEqual(self.runner.run_cycle()["status"], "ok")
+        st = self.status()
+        self.assertEqual(st["assignment_summary_text"], "派单 5 · 插件管理 2 · 非插件管理 1 · 待加种 1 · 退避 0 · 收回 1")
+        got = [(r["name"], r["action_text"], r["local_text"], r["downloader"]) for r in st["assignments"]]
+        self.assertEqual(got, [
+            ("#4", "收回", "收回且下载器里已没有", ""),
+            ("#5", "新派", "待加种（派单没有下载链接）", ""),
+            ("New.Film", "新派", "本轮已加", "qb1"),
+            ("Theirs.Film", "保持", "已在下载器（非插件管理）·做种中", "qb1"),
+            ("站点给的名字", "保持", "插件管理·下载中 0%", "qb1"),
+        ])
+        self.assertEqual(st["assignments"][2]["size_text"], "1.0 KiB")
+        blob = json.dumps(st, ensure_ascii=False)
+        for h in (mine, theirs, new, gone, later):
+            self.assertNotIn(h, blob)
+        self.assertNotIn("http", blob)
+        self.assertNotIn(SIGNED, self.everything_written(sess))
+
+    def test_panel_renders_assignment_table(self):
+        html = (ROOT / "templates" / "index.html").read_text("utf-8")
+        for text in ("<th>种子名</th>", "<th class=\"num\">体积</th>", "<th>站点要求</th>", "<th>本地情况</th>",
+                     "<th>下载器</th>", "/account/seed-group", "s.assignment_summary_text"):
+            self.assertIn(text, html)
+        self.assertNotIn("info_hash", html)
 
 
 class HumanSize(unittest.TestCase):

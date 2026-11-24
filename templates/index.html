@@ -41,6 +41,11 @@
   th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--line); vertical-align: top; white-space: nowrap; }
   th { font-size: 12px; color: var(--muted); font-weight: 500; }
   td.num, th.num { text-align: right; }
+  table.assign td.wrap { white-space: normal; overflow-wrap: anywhere; word-break: break-word; }
+  table.assign td.name { min-width: 10em; }
+  table.assign td.local { min-width: 7em; }
+  table.assign td.action { min-width: 5em; }
+  a { color: var(--accent); }
   code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; }
   .scroll { overflow-x: auto; }
   ul.plain { list-style: none; padding: 0; margin: 0; }
@@ -97,14 +102,15 @@
   </section>
 
   <section class="card">
-    <h2>本服务加的种子</h2>
+    <h2 id="assign-summary">全部派单</h2>
     <div class="scroll">
-      <table>
-        <thead><tr><th>info_hash</th><th>种子</th><th class="num">大小</th><th>下载器</th><th>加入时间</th></tr></thead>
-        <tbody id="owned"><tr><td colspan="5" class="muted">加载中…</td></tr></tbody>
+      <table class="assign">
+        <thead><tr><th>种子名</th><th class="num">体积</th><th>站点要求</th><th>本地情况</th><th>下载器</th></tr></thead>
+        <tbody id="assignments"><tr><td colspan="5" class="muted">加载中…</td></tr></tbody>
       </table>
     </div>
-    <p class="hint">只有这里列出的种子（本服务加的、带专用标签、在专用目录里）会在站点收回派单时被删除。下载器里已有的同一颗种子、你自己的种子、别站的种子都不会被碰。</p>
+    <p class="hint">这里只是下载器这一侧的情况；tracker 有没有把它算作做种，以站点<a id="sg-link" href="https://www.colapt.com/account/seed-group" target="_blank" rel="noopener noreferrer">保种组页面</a>为准。
+      只有「插件管理」的种子（本服务加的、带专用标签、在专用目录里）会在站点收回派单时被删除；下载器里已有的同一颗种子、你自己的种子、别站的种子都不会被碰。</p>
   </section>
 
   <section class="card">
@@ -248,11 +254,19 @@ function renderStatus(s) {
   $("skipped-card").hidden = !sk.length;
   $("skipped").innerHTML = sk.map((e) => `<li>${esc(e.text)} × ${e.count} <code>${esc(e.code)}</code></li>`).join("");
 
-  $("owned").innerHTML = s.owned.length ? s.owned.map((o) => `<tr>
-      <td class="mono" title="${esc(o.info_hash)}">${esc(o.info_hash.slice(0, 12))}</td>
-      <td>${esc(o.torrent_id)}</td><td class="num">${esc(o.size_text)}</td>
-      <td>${esc(o.downloader)}</td><td>${esc(fmtTime(o.added_at))}</td></tr>`).join("")
-    : `<tr><td colspan="5" class="muted">本服务还没有加过种子</td></tr>`;
+  // 行、顺序、文案都由执行器给出（与 MoviePilot 插件页一致），这里只排版
+  const rows = s.assignments;
+  $("assign-summary").textContent = rows ? s.assignment_summary_text : "全部派单";
+  const empty = (t) => `<tr><td colspan="5" class="muted">${esc(t)}</td></tr>`;
+  let html;
+  if (!rows) html = empty(!last ? "还没有运行过" : (last.status === "ok" ? "下一轮运行后显示全部派单" : "还没有拿到派单"));
+  else if (!rows.length) html = empty("站点暂时没有派单");
+  else html = rows.map((r) => `<tr>
+      <td class="wrap name">${esc(r.name)}</td><td class="num">${esc(r.size_text)}</td>
+      <td class="wrap action">${esc(r.action_text)}</td><td class="wrap local">${esc(r.local_text)}</td>
+      <td>${esc(r.downloader || "—")}</td></tr>`).join("");
+  if (s.assignments_truncated) html += empty(`还有 ${s.assignments_truncated} 条未列出`);
+  $("assignments").innerHTML = html;
   $("run").disabled = s.running || !s.configured;
 }
 
@@ -268,6 +282,7 @@ function dlRow(d = {}) {
 }
 
 function fillConfig(c) {
+  try { $("sg-link").href = new URL("/account/seed-group", c.site_url).href; } catch (e) { /* 地址不合法时保留默认 */ }
   for (const k of ["site_url", "save_path", "tag", "interval", "max_adds", "max_deletes"]) $(k).value = c[k];
   $("enabled").checked = !!c.enabled;
   $("delete_files").checked = !!c.delete_files;

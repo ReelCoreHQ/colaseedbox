@@ -1,13 +1,17 @@
 """面板数据：把上一轮结果与账本整理成页面要显示的东西（文案、体积换算、错误码说明）。
 
 与插件页（plugins.v3/colaseedgroup/__init__.py 的 get_page）同口径：上次运行结果、派单条数、
-本服务管理的种子与体积、本轮新加/删除、申报空间；体积一律自动换算单位。
+本服务管理的种子与体积、本轮新加/删除、申报空间，以及**全部派单**的表（种子名 | 体积 | 站点要求 |
+本地情况 | 下载器）。派单表的行、顺序、文案都来自搬来的执行器（``seedgroup.engine``），与插件页逐字一致；
+不显示 info_hash。体积一律自动换算单位。
 错误只按固定原因码 / 站点的 ``code`` 显示，从不显示站点 ``message`` 或异常原文。
 """
 
 import time
 from collections import Counter
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
+
+from .seedgroup.engine import action_text, local_text, summary_text
 
 STATUS_TEXT = {
     "ok": "正常",
@@ -115,6 +119,27 @@ def explain(code: str) -> Dict[str, str]:
     return {"code": code, "text": text}
 
 
+def _clock(ts: float) -> str:
+    return time.strftime("%m-%d %H:%M", time.localtime(ts)) if ts else "-"
+
+
+def assignments(last: Dict[str, Any]) -> Optional[List[Dict[str, Any]]]:
+    """派单表的行（已按执行器的顺序排好）。只给显示要用的字段：没有 info_hash、没有链接。"""
+    rows = last.get("assignments")
+    if rows is None:
+        return None
+    return [{
+        "torrent_id": r.get("torrent_id"),
+        "name": str(r.get("name") or ""),
+        "size_text": human_size(r.get("size") or 0),
+        "action": r.get("action") or "",
+        "action_text": action_text(r),
+        "local": r.get("local") or "",
+        "local_text": local_text(r, _clock),
+        "downloader": r.get("downloader") or "",
+    } for r in rows]
+
+
 def _errors(last: Dict[str, Any]) -> List[Dict[str, str]]:
     out = []
     if last.get("status") not in (None, "ok") and last.get("reason") and last.get("status") != "outdated":
@@ -132,17 +157,7 @@ def _errors(last: Dict[str, Any]) -> List[Dict[str, str]]:
 def status(cfg: Dict[str, Any], state: Dict[str, Any], last: Dict[str, Any], *, version: str,
            running: bool, next_run_at: Any, missing: List[str]) -> Dict[str, Any]:
     owned = state.get("owned") or {}
-    rows = []
-    for h, rec in sorted(owned.items(), key=lambda kv: -int(kv[1].get("added_at") or 0)):
-        rows.append({
-            "info_hash": h,
-            "torrent_id": rec.get("torrent_id"),
-            "size": int(rec.get("size") or 0),
-            "size_text": human_size(rec.get("size") or 0),
-            "downloader": rec.get("downloader") or "",
-            "added_at": int(rec.get("added_at") or 0),
-        })
-    total = sum(r["size"] for r in rows)
+    total = sum(int(rec.get("size") or 0) for rec in owned.values())
     skipped = Counter(str(v).split(":", 1)[0] for v in (last.get("skipped") or {}).values())
     stat = last.get("status")
     summary = None
@@ -175,8 +190,10 @@ def status(cfg: Dict[str, Any], state: Dict[str, Any], last: Dict[str, Any], *, 
         "configured": not missing,
         "missing": [{"code": m, "text": REASON_TEXT.get(m, m)} for m in missing],
         "last": summary,
-        "owned": rows,
-        "owned_count": len(rows),
+        "assignments": assignments(last),
+        "assignment_summary_text": summary_text(last.get("assignment_summary") or {}),
+        "assignments_truncated": int(last.get("assignments_truncated") or 0),
+        "owned_count": len(owned),
         "owned_total": total,
         "owned_total_text": human_size(total),
     }
