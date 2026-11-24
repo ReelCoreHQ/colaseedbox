@@ -16,6 +16,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Resp
 from . import view
 from .auth import MAX_PASSWORD, SESSION_TTL, Auth, PasswordError
 from .config import ConfigError, Store, merge_update, missing_fields, public_view
+from .proxies import Trusted, client_ip, parse_trusted
 from .runner import Runner
 from .seedgroup import VERSION
 
@@ -31,6 +32,11 @@ logging.getLogger("uvicorn.access").disabled = True
 store = Store(DATA_DIR)
 runner = Runner(store)
 auth = Auth(DATA_DIR, env_password=os.environ.get("COLASEEDGROUP_PASSWORD"))
+try:
+    trusted_proxies = parse_trusted(os.environ.get("COLASEEDGROUP_TRUSTED_PROXIES"))
+    TRUSTED_PROXIES_ERROR = ""
+except ValueError as err:
+    trusted_proxies, TRUSTED_PROXIES_ERROR = Trusted(), str(err)
 
 COOKIE = "colaseedgroup_session"
 # 不登录也能访问的路径；其余全部要会话（新加的接口默认受保护）
@@ -43,6 +49,9 @@ async def lifespan(_app: FastAPI):
     if not os.access(DATA_DIR, os.W_OK):
         log.error("数据目录 %s 对当前用户 uid=%s gid=%s 不可写：把宿主机上的 data 目录 chown 给这个 uid/gid，"
                   "或在 compose 里把 PUID/PGID 改成目录主人的", DATA_DIR, os.getuid(), os.getgid())
+        raise SystemExit(1)
+    if TRUSTED_PROXIES_ERROR:
+        log.error("%s", TRUSTED_PROXIES_ERROR)
         raise SystemExit(1)
     try:
         auth.ensure()
@@ -83,8 +92,11 @@ def _cookie_secure(request: Request) -> bool:
 
 
 def _client_key(request: Request) -> str:
-    # 只用于登录失败计数（内存里），不写日志。反向代理后面大家共用代理的地址，等于只剩全局限速。
-    return request.client.host if request.client else "-"
+    # 只用于登录失败计数（内存里），不写日志。没配 COLASEEDGROUP_TRUSTED_PROXIES 时就是直连对端地址
+    # （反向代理后面大家共用代理的地址）；配了就按 proxies.client_ip 从转发头里找真实客户端。
+    return client_ip(request.client.host if request.client else None,
+                     request.headers.getlist("x-forwarded-for"), trusted_proxies,
+                     request.headers.get("cf-connecting-ip"))
 
 
 def _issue_cookie(response: Response, request: Request, token: str) -> None:

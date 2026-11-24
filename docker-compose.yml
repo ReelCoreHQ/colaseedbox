@@ -19,6 +19,9 @@ services:
       # COLASEEDGROUP_PASSWORD: "change-me-please"
       # Cookie 的 Secure 标记：auto（默认，收到 https 才加）| 1 | 0
       # COLASEEDGROUP_COOKIE_SECURE: auto
+      # 只有真有反向代理挡在前面时才设（否则别人能伪造 X-Forwarded-For 绕过登录限速）：
+      # 让登录限速按真实客户端计数。同机 Caddy/Nginx 写 docker 网桥网段；前面还有 Cloudflare 再加 cloudflare。
+      # COLASEEDGROUP_TRUSTED_PROXIES: "172.16.0.0/12,cloudflare"
     # 下载器在宿主机上时打开（Linux 下容器里的 127.0.0.1 是容器自己）：
     # extra_hosts:
     #   - "host.docker.internal:host-gateway"

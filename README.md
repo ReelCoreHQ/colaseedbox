@@ -98,7 +98,17 @@ docker compose up -d --build
 - **放在 HTTPS 反向代理（Caddy / Nginx）后面**：不用改什么，Cookie 照常工作。环境变量
   `COLASEEDGROUP_COOKIE_SECURE` 控制 Cookie 的 Secure 标记：`auto`（默认，服务自己收到的是 https 才加；
   代理把 https 转成 http 发进来时不加，Cookie 仍会在 https 下发送）、`1`（总是加——之后只能经 https 登录）、`0`（从不加）。
-  代理后面所有人在服务看来是同一个来源地址，此时输错限速等于对所有人一起算。
+- **反向代理后面的限速**：默认只看直连对端地址，代理后面所有人在服务看来是同一个来源，输错限速等于对所有人一起算
+  （一个人连错，别人也要等）。环境变量 `COLASEEDGROUP_TRUSTED_PROXIES`（逗号分隔的 IP / CIDR，IPv4、IPv6 都行）
+  告诉服务哪些地址是你的代理：直连对端在列表里时，从右往左读 `X-Forwarded-For`、跳过列表里的地址，第一个不在列表里的就是
+  真实客户端；格式不对就退回对端地址。这个地址只用于限速计数，不写日志。
+  - **只有真有反向代理挡在前面时才设**。没有代理却设了，任何人都能伪造 `X-Forwarded-For` 换地址绕过单地址限速
+    （全局上限仍在）。
+  - Caddy / Nginx 和本容器在同一台机器：代理经 docker 网桥进来，写网桥网段，例如 `172.16.0.0/12`。
+  - 前面还有 Cloudflare：再加一个 `cloudflare`（展开成 Cloudflare 公布的地址段，写死在 `app/proxies.py`，
+    抄录于 2026-11-24；Cloudflare 改了列表就要更新）。转发链最外一跳是 Cloudflare 时，用 Cloudflare 写的
+    `CF-Connecting-IP`（像 Caddy 默认那样不信 Cloudflare、只把边缘节点地址写进 `X-Forwarded-For` 时也能拿到真实客户端）。
+  - 例：`COLASEEDGROUP_TRUSTED_PROXIES: "172.16.0.0/12,cloudflare"`。有不合法的项时容器在日志里说明并退出。
 
 ## 面板
 

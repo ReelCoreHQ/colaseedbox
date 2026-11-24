@@ -26,6 +26,8 @@
 - 改动接口（含登录、退出、改密码）只收 `application/json`（跨站表单发不出来），Cookie 是 SameSite=Strict。
 - 密码比较是常数时间；输错按来源地址指数退避（5 次后 2 秒起翻倍，最多 15 分钟），另有全局上限（10 分钟 30 次）；
   等待期间不校验密码。
+- 默认只按直连对端地址计数；设了 `COLASEEDGROUP_TRUSTED_PROXIES` 才从受信任代理给的 `X-Forwarded-For`
+  （以及经 Cloudflare 时的 `CF-Connecting-IP`）里取真实客户端，见 README「登录」。对端不在列表里时转发头一概不信。
 - 改密码要输当前密码，新密码至少 8 位；改完其它会话全部作废。
 - Cookie 的 Secure 标记由 `COLASEEDGROUP_COOKIE_SECURE=auto|1|0` 控制，见 README「登录」。
 - 面板本身是 HTTP：从外网访问请放在 HTTPS 反向代理后面，否则密码和 Cookie 在路上是明文。
