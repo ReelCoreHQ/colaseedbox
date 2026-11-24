@@ -37,6 +37,17 @@ class AdapterTests(unittest.TestCase):
         self.assertEqual(_parse_add({"success_count": 0, "failure_count": 1}), (False, []))
         self.assertEqual(_parse_add(None), (False, []))
 
+    def test_qb_async_add_waits_until_visible(self):
+        from support import fake_qb
+
+        from app.seedgroup.clients import wrap
+        qb = fake_qb()
+        qb.qbc.async_add = True               # qB 的 add 回成功时种子还不在列表里
+        data, h = make_torrent("Async")
+        ok, _ = qb.add_torrent(content=data, download_dir="/d", tag=["t"])
+        self.assertTrue(ok)
+        self.assertEqual([t.info_hash for t in wrap("qb", "qbittorrent", qb).list_torrents()], [h])
+
     def test_tr_added_vs_duplicate(self):
         data, h = make_torrent("Film")
         inst = fake_tr({"result": "success", "arguments": {"torrent-added": {"hashString": h, "id": 1}}})

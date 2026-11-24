@@ -12,6 +12,7 @@
 import base64
 import json
 import logging
+import time
 from typing import Any, List, Optional, Tuple
 from urllib.parse import urlsplit
 
@@ -19,11 +20,13 @@ import qbittorrentapi
 import transmission_rpc
 
 from .seedgroup.clients import wrap
+from .seedgroup.torrent import TorrentError, info_hash
 
 log = logging.getLogger("colaseedgroup")
 
 CONNECT_TIMEOUT = 5
 READ_TIMEOUT = 60
+ADD_VISIBLE_WAIT = 5
 
 # 库自己的日志可能带地址：只放行 ERROR 以上，且我们从不打开它们的调试输出
 for _name in ("qbittorrentapi", "transmission-rpc", "urllib3"):
@@ -81,7 +84,27 @@ class QbInstance:
         except Exception as err:
             log.warning("下载器 %s 加种失败：%s", self.name, type(err).__name__)
             return False, []
-        return _parse_add(ret)
+        ok, ids = _parse_add(ret)
+        if ok:
+            self._wait_visible(content)
+        return ok, ids
+
+    def _wait_visible(self, content: bytes) -> None:
+        """qB 的 add 是异步的：接口回了成功，种子要过一会儿才出现在列表里。执行器加完马上列一次确认，
+        看不到就不记账——种子留在下载器里却不归本服务管。这里最多等 ADD_VISIBLE_WAIT 秒，等它出现再返回
+        （MoviePilot 的 qB 模块加种后也会按 hash 等它出现）。"""
+        try:
+            h = info_hash(content)
+        except TorrentError:
+            return
+        deadline = time.monotonic() + ADD_VISIBLE_WAIT
+        while time.monotonic() < deadline:
+            try:
+                if list(self.qbc.torrents_info(torrent_hashes=h) or []):
+                    return
+            except Exception as err:  # 查不到就继续等，等不到交给执行器按 not_visible 处理
+                log.debug("下载器 %s 查新加的种子失败：%s", self.name, type(err).__name__)
+            time.sleep(0.25)
 
     def delete_torrents(self, delete_file: bool, ids: Any) -> bool:
         if not self.qbc or not ids:

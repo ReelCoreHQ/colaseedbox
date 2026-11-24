@@ -108,21 +108,33 @@ class FakeQbc:
         self.rows = []
         self.deleted = []
         self.calls = []
+        self.adding = []
+        self.adding_polls = 0
+        self.async_add = False
         self.fail_list = False
 
-    def torrents_info(self):
+    def torrents_info(self, torrent_hashes=None):
         if self.fail_list:
             raise ConnectionError(f"http://{LAN}:8080 refused (password={QB_PASS})")
-        return [dict(r) for r in self.rows]
+        if self.adding:                       # 异步加种：第二次查询才出现在列表里
+            self.adding_polls += 1
+            if self.adding_polls >= 2:
+                self.rows += self.adding
+                self.adding = []
+        return [dict(r) for r in self.rows if not torrent_hashes or r["hash"] == torrent_hashes]
 
     def torrents_add(self, torrent_files, save_path, is_paused, tags, category, use_auto_torrent_management):
         from app.seedgroup.torrent import info_hash, torrent_name
         h, n = info_hash(torrent_files), torrent_name(torrent_files)
         if any(r["hash"] == h for r in self.rows):
             return "Fails."
-        self.rows.append({"hash": h, "name": n, "save_path": save_path, "content_path": f"{save_path}/{n}",
-                          "tags": ",".join(tags), "progress": 0, "state": "downloading", "size": 1024,
-                          "uploaded": 0})
+        row = {"hash": h, "name": n, "save_path": save_path, "content_path": f"{save_path}/{n}",
+               "tags": ",".join(tags), "progress": 0, "state": "downloading", "size": 1024, "uploaded": 0}
+        if self.async_add:
+            self.adding.append(row)
+            self.adding_polls = 0
+        else:
+            self.rows.append(row)
         return "Ok."
 
     def torrents_delete(self, delete_files, torrent_hashes):
