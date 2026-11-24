@@ -75,6 +75,13 @@ echo "  面板：http://$IP:$SG_PORT"
 echo "  数据：$SG_DIR/data（配置含 API Key，权限 0600；重建容器不丢）"
 echo "  日志：docker logs -f $NAME"
 echo "──────────────────────────────────────────────"
+# 第一次启动时容器日志里有一行初始登录密码（只此一次）；升级时没有，沿用原来的密码
+pw_line=$(docker logs "$NAME" 2>&1 | grep -o '初始登录密码：.*' | tail -n 1 || true)
+if [ -n "$pw_line" ]; then
+  echo "  $pw_line"
+else
+  echo "  登录密码沿用原来的；忘了就删掉 $SG_DIR/data/auth.json 再 docker restart $NAME，日志里会显示新密码"
+fi
 echo
-echo "下一步：打开面板 →「设置」→ 填 API Key（站点「账号 → Key → API Key」新建，只勾「保种组」范围）"
+echo "下一步：登录面板 →「设置」→ 填 API Key（站点「账号 → Key → API Key」新建，只勾「保种组」范围）"
 echo "        和下载器（qBittorrent / Transmission），保存后会马上跑一轮。"

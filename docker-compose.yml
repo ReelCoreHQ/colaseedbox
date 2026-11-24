@@ -7,13 +7,21 @@ services:
     # 普通用户运行：PUID/PGID 填数据目录 ./data 主人的 uid/gid（install.sh 会自动写入 .env）；不填就是 1000:1000。
     user: "${PUID:-1000}:${PGID:-1000}"
     ports:
-      # 面板没有登录，只放在可信的局域网里；只想本机访问就改成 "127.0.0.1:3006:3006"。
+      # 面板要登录：初始密码第一次启动时只在日志里显示一次（docker logs colaseedgroup-docker 2>&1 | grep 初始登录密码），
+      # 忘了就删 data/auth.json 再重启。面板是 HTTP，外网访问请套 HTTPS 反代；只想本机访问就改成 "127.0.0.1:3006:3006"。
       # 面板永远不回显 API Key / 下载器密码；改站点地址或下载器地址必须同时重填对应的秘密。
       - "3006:3006"
     volumes:
       - ./data:/data         # 配置（含 API Key，0600）与账本，重建容器不丢
     environment:
       TZ: Asia/Shanghai
+      # 可选：用环境变量定登录密码（≥ 8 位，面板里不能改；docker inspect 能看到它）
+      # COLASEEDGROUP_PASSWORD: "change-me-please"
+      # Cookie 的 Secure 标记：auto（默认，收到 https 才加）| 1 | 0
+      # COLASEEDGROUP_COOKIE_SECURE: auto
+      # 只有真有反向代理挡在前面时才设（否则别人能伪造 X-Forwarded-For 绕过登录限速）：
+      # 让登录限速按真实客户端计数。同机 Caddy/Nginx 写 docker 网桥网段；前面还有 Cloudflare 再加 cloudflare。
+      # COLASEEDGROUP_TRUSTED_PROXIES: "172.16.0.0/12,cloudflare"
     # 下载器在宿主机上时打开（Linux 下容器里的 127.0.0.1 是容器自己）：
     # extra_hosts:
     #   - "host.docker.internal:host-gateway"

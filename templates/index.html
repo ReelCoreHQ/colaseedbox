@@ -52,7 +52,7 @@
   button:disabled { opacity: .55; cursor: default; }
   button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   form .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 14px; }
-  @media (max-width: 720px) { form .grid { grid-template-columns: 1fr; } }
+  @media (max-width: 720px) { form .grid { grid-template-columns: 1fr; } form .grid .spacer { display: none; } }
   label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 3px; }
   input, select { width: 100%; font: inherit; padding: 7px 9px; border-radius: 8px;
                   border: 1px solid var(--line); background: var(--bg); color: var(--fg); }
@@ -73,6 +73,7 @@
       <span class="muted" id="version"></span>
       <span class="muted" id="auto" role="status"></span>
       <button class="primary" id="run" title="不等下一轮定时，马上向站点拉一次派单、对齐下载器并上报状态">立即同步</button>
+      <button id="logout" title="退出这个浏览器的登录">退出登录</button>
     </div>
   </header>
 
@@ -152,6 +153,30 @@
         </div>
         <p class="hint">实例 ID：<span class="mono" id="instance_id"></span></p>
       </form>
+
+      <form id="pw" style="margin-top:18px;border-top:1px solid var(--line);padding-top:14px">
+        <h2>登录密码</h2>
+        <div class="grid">
+          <div>
+            <label for="pw_current">当前密码</label>
+            <input id="pw_current" type="password" autocomplete="current-password" required>
+          </div>
+          <div class="spacer"></div>
+          <div>
+            <label for="pw_new">新密码（至少 8 位）</label>
+            <input id="pw_new" type="password" autocomplete="new-password" minlength="8" required>
+          </div>
+          <div>
+            <label for="pw_confirm">再输一次新密码</label>
+            <input id="pw_confirm" type="password" autocomplete="new-password" minlength="8" required>
+          </div>
+        </div>
+        <div class="row" style="margin-top:12px">
+          <button class="primary" type="submit" id="pw_save">修改密码</button>
+          <span id="pw_toast" class="muted" role="status"></span>
+        </div>
+        <p class="hint" id="pw_hint">改完后其它浏览器的登录会全部退出。忘了密码：删掉数据目录里的 <code>auth.json</code> 并重启容器，日志里会显示新的初始密码。</p>
+      </form>
     </details>
   </section>
 </main>
@@ -178,6 +203,7 @@ const TRIGGER = {startup: "启动后同步", schedule: "定时同步", manual: "
 
 async function api(path, opts = {}) {
   const r = await fetch(path, {headers: {"Content-Type": "application/json"}, ...opts});
+  if (r.status === 401) { location.replace("/login"); throw new Error("需要登录"); }
   const body = await r.json().catch(() => ({}));
   if (!r.ok) throw Object.assign(new Error("http " + r.status), {body});
   return body;
@@ -248,6 +274,10 @@ function fillConfig(c) {
   $("api_key").value = "";
   $("api_key").placeholder = c.api_key_set ? "已保存（留空 = 不改）" : "还没填";
   $("instance_id").textContent = c.instance_id;
+  if (c.password_from_env) {
+    for (const id of ["pw_current", "pw_new", "pw_confirm", "pw_save"]) $(id).disabled = true;
+    $("pw_hint").textContent = "密码由环境变量 COLASEEDGROUP_PASSWORD 设定，面板里不能改；要改就改环境变量并重建容器。";
+  }
   $("dls").innerHTML = "";
   (c.downloaders.length ? c.downloaders : [{}]).forEach(dlRow);
 }
@@ -285,6 +315,24 @@ $("run").onclick = async () => {
   try { await api("/api/run", {method: "POST", body: "{}"}); } finally { setTimeout(refresh, 800); }
 };
 $("add-dl").onclick = () => dlRow();
+$("logout").onclick = async () => {
+  await fetch("/api/logout", {method: "POST", headers: {"Content-Type": "application/json"}, body: "{}"}).catch(() => {});
+  location.replace("/login");
+};
+const PW_ERR = {wrong_password: "当前密码不对", too_short: "新密码至少 8 位", too_long: "新密码太长",
+                password_from_env: "密码由环境变量设定，不能在这里改", too_many_attempts: "错误次数太多，请稍后再试"};
+$("pw").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  if ($("pw_new").value !== $("pw_confirm").value) { $("pw_toast").textContent = "两次输入的新密码不一样"; return; }
+  try {
+    await api("/api/password", {method: "POST", body: JSON.stringify({current: $("pw_current").value, new: $("pw_new").value})});
+    $("pw").reset();
+    $("pw_toast").textContent = "密码已修改，其它浏览器的登录已退出。";
+  } catch (e) {
+    const err = (e.body && e.body.error) || {};
+    $("pw_toast").textContent = "修改失败：" + (PW_ERR[err.code] || err.code || e.message);
+  }
+});
 $("cfg").addEventListener("submit", save);
 api("/api/config").then(fillConfig);
 refresh();

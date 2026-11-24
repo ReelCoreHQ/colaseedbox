@@ -40,7 +40,28 @@ jobs:
           [ -n "$ok" ] || { echo "容器没起来，日志："; docker logs smoke; exit 1; }
           echo "$body" | python3 -c "import json,sys;d=json.load(sys.stdin);assert d['ok'] and d['service']=='colaseedgroup-docker',d"
           ! docker exec smoke sh -c 'command -v curl'
-          # 未配置时不连站点、不碰下载器，只提示缺什么
-          python3 -c "import json,urllib.request;s=json.load(urllib.request.urlopen('http://127.0.0.1:3006/api/status'));assert not s['configured'],s"
+          # 面板要登录：初始密码只在日志里出现一次，data 里只有哈希（0600）
+          [ "$(docker logs smoke 2>&1 | grep -c '初始登录密码：')" = 1 ]
+          pw=$(docker logs smoke 2>&1 | sed -n 's/.*初始登录密码：\([^（]*\)（.*/\1/p')
+          [ -n "$pw" ]
+          echo "::add-mask::$pw"
+          docker exec smoke sh -c 'stat -c %a /data/auth.json' | grep -qx 600
+          ! docker exec smoke grep -qF -- "$pw" /data/auth.json
+          # 未登录 401；登录后：未配置时不连站点、不碰下载器，只提示缺什么
+          SG_PW="$pw" python3 - <<'PY'
+          import http.cookiejar, json, os, urllib.error, urllib.request
+          base = "http://127.0.0.1:3006"
+          try:
+              urllib.request.urlopen(base + "/api/status")
+              raise SystemExit("未登录也能看 /api/status")
+          except urllib.error.HTTPError as err:
+              assert err.code == 401, err.code
+          opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
+          req = urllib.request.Request(base + "/api/login", data=json.dumps({"password": os.environ["SG_PW"]}).encode(),
+                                       headers={"Content-Type": "application/json"})
+          assert opener.open(req).status == 200
+          s = json.load(opener.open(base + "/api/status"))
+          assert not s["configured"], s
+          PY
           docker exec smoke sh -c 'stat -c %a /data/config.json' | grep -qx 600
-          docker logs smoke
+          docker logs smoke 2>&1 | sed 's/初始登录密码：[^（]*/初始登录密码：***/'
