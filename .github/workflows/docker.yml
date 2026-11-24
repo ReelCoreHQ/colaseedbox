@@ -1,8 +1,7 @@
-# 构建独立版镜像并冒烟（不推送镜像仓库）。
-#
-# **不推 GHCR**：ReelCoreHQ 组织的 packages 权限对 GITHUB_TOKEN 返回
-# denied: permission_denied: read_package，是组织级限制。对外只提供
-# 「clone 整个仓库后 docker compose up -d」/ install-box.sh 这条路径。
+# 构建独立版镜像并冒烟；main 上冒烟通过后推到 GHCR：
+#   ghcr.io/reelcorehq/colaseedgroup-docker:<版本>（取自 app/seedgroup/VENDOR.json 的 plugin_version）、:latest、:sha-<短提交>
+#   linux/amd64 + linux/arm64（群晖 / 威联通 / 树莓派等 ARM NAS 也能直接拉）。
+# PR 只构建与冒烟，不推送。
 name: docker
 
 on:
@@ -10,6 +9,9 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   build:
@@ -65,3 +67,42 @@ jobs:
           PY
           docker exec smoke sh -c 'stat -c %a /data/config.json' | grep -qx 600
           docker logs smoke 2>&1 | sed 's/初始登录密码：[^（]*/初始登录密码：***/'
+
+  publish:
+    needs: build
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: 版本号
+        id: v
+        run: |
+          v=$(python3 -c "import json;print(json.load(open('app/seedgroup/VENDOR.json'))['plugin_version'])")
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "short=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: 构建并推送（amd64 + arm64）
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ghcr.io/reelcorehq/colaseedgroup-docker:${{ steps.v.outputs.version }}
+            ghcr.io/reelcorehq/colaseedgroup-docker:latest
+            ghcr.io/reelcorehq/colaseedgroup-docker:sha-${{ steps.v.outputs.short }}
+          labels: |
+            org.opencontainers.image.version=${{ steps.v.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
