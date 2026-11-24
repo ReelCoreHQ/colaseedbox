@@ -34,6 +34,10 @@ runner = Runner(store)
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     os.umask(0o077)
+    if not os.access(DATA_DIR, os.W_OK):
+        log.error("数据目录 %s 对当前用户 uid=%s gid=%s 不可写：把宿主机上的 data 目录 chown 给这个 uid/gid，"
+                  "或在 compose 里把 PUID/PGID 改成目录主人的", DATA_DIR, os.getuid(), os.getgid())
+        raise SystemExit(1)
     cfg = store.load()
     log.info("可乐保种组 Docker 版 %s 启动，每 %s 分钟对齐一次", VERSION, cfg["interval"])
     if os.environ.get("COLASEEDGROUP_NO_SCHEDULER") != "1":

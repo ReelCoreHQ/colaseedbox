@@ -23,6 +23,12 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app ./app
 COPY templates ./templates
 
+# 用普通用户跑（默认 1000:1000）。compose 里用 PUID / PGID 换成宿主机上数据目录主人的 uid/gid。
+RUN groupadd --gid 1000 colaseedgroup \
+ && useradd --uid 1000 --gid 1000 --no-create-home --shell /usr/sbin/nologin colaseedgroup \
+ && mkdir -p /data && chown 1000:1000 /data && chmod 700 /data
+USER 1000:1000
+
 VOLUME ["/data"]
 EXPOSE 3006
 

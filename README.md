@@ -35,8 +35,13 @@ curl -fsSL https://raw.githubusercontent.com/ReelCoreHQ/colaseedgroup-docker/mai
 ```bash
 git clone --depth 1 https://github.com/ReelCoreHQ/colaseedgroup-docker.git
 cd colaseedgroup-docker
+mkdir -p data && chmod 700 data
+printf 'PUID=%s\nPGID=%s\n' "$(id -u)" "$(id -g)" > .env   # 容器用这个 uid/gid（普通用户）运行
 docker compose up -d --build
 ```
+
+容器**以普通用户运行**（默认 1000:1000，`.env` 里的 `PUID` / `PGID` 可改），不是 root。`data/` 必须归这个 uid/gid 所有；
+不可写时容器会在日志里说明并退出。
 
 装好后打开 `http://<本机IP>:3006` →「设置」：填 API Key、下载器，保存后立即跑一轮。
 

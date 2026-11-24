@@ -4,6 +4,8 @@ services:
     image: colaseedgroup-docker:local
     container_name: colaseedgroup-docker
     restart: unless-stopped
+    # 普通用户运行：PUID/PGID 填数据目录 ./data 主人的 uid/gid（install.sh 会自动写入 .env）；不填就是 1000:1000。
+    user: "${PUID:-1000}:${PGID:-1000}"
     ports:
       # 面板没有登录，只放在可信的局域网里；只想本机访问就改成 "127.0.0.1:3006:3006"。
       # 面板永远不回显 API Key / 下载器密码；改站点地址或下载器地址必须同时重填对应的秘密。

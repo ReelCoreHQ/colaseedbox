@@ -37,6 +37,9 @@ say "下载代码"
 fetch "$TGZ" | tar xz --strip-components=1 --exclude=data --exclude=.git
 mkdir -p data
 chmod 700 data
+# 容器用普通用户跑：用 data 目录主人的 uid/gid（以 root 跑本脚本时就是 root 建的目录 → 改给 1000:1000）
+if [ "$(id -u)" = 0 ]; then chown -R 1000:1000 data; fi
+printf 'PUID=%s\nPGID=%s\n' "$(stat -c %u data)" "$(stat -c %g data)" > .env
 
 # ── 3. 端口 ──────────────────────────────────────────────────
 if [ "$SG_PORT" != "3006" ]; then
