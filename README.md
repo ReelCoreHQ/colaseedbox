@@ -40,6 +40,19 @@ printf 'PUID=%s\nPGID=%s\n' "$(id -u)" "$(id -g)" > .env   # 容器用这个 uid
 docker compose up -d --build
 ```
 
+直接用现成镜像（不 clone、不构建；amd64 / arm64 都有）：
+
+```bash
+mkdir -p colaseedgroup/data && cd colaseedgroup && chmod 700 data
+docker run -d --name colaseedgroup-docker --restart unless-stopped \
+  --user "$(id -u):$(id -g)" -p 3006:3006 -v "$PWD/data:/data" \
+  ghcr.io/reelcorehq/colaseedgroup-docker:latest
+docker logs colaseedgroup-docker 2>&1 | grep 初始登录密码
+```
+
+升级：`docker pull ghcr.io/reelcorehq/colaseedgroup-docker:latest`，删掉旧容器后用同一条 `docker run` 再起（`data/` 保留）。
+固定版本就把 `latest` 换成版本号，如 `:0.7.0`。
+
 容器**以普通用户运行**（默认 1000:1000，`.env` 里的 `PUID` / `PGID` 可改），不是 root。`data/` 必须归这个 uid/gid 所有；
 不可写时容器会在日志里说明并退出。
 
