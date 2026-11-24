@@ -3,217 +3,290 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ColaSeedBox · 保种组</title>
+<title>可乐保种组 · Docker 版</title>
 <style>
-  :root{
-    --bg:#faf9f7; --fg:#1f1d1a; --muted:#6b655c; --line:#e5e1da;
-    --accent:#9b2c2c; --ok:#2f7d4f; --warn:#a8641a; --err:#b3261e;
-    --card:#fff; --radius:10px;
+  :root {
+    --bg: #f6f6f4; --card: #ffffff; --fg: #1d1d1b; --muted: #6b6b66; --line: #e3e2dd;
+    --accent: #b3261e; --ok-bg: #e7f4ea; --ok-fg: #1e6b34; --warn-bg: #fff4dc; --warn-fg: #7a5200;
+    --err-bg: #fde8e6; --err-fg: #9b1c14; --info-bg: #e8eef8; --info-fg: #24467a; --on-accent: #ffffff;
   }
-  @media (prefers-color-scheme: dark){
-    :root{ --bg:#17161a; --fg:#ece9e4; --muted:#9c968c; --line:#2c2a30; --card:#1f1e23; }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #151514; --card: #1f1f1d; --fg: #ecebe6; --muted: #a09f98; --line: #34332f;
+      --accent: #ff7a6e; --ok-bg: #173523; --ok-fg: #8fd9a5; --warn-bg: #3a2d0e; --warn-fg: #f2c86b;
+      --err-bg: #3d1a17; --err-fg: #ffaaa2; --info-bg: #1b2a40; --info-fg: #a9c3ec; --on-accent: #1d0d0b;
+    }
   }
-  *{box-sizing:border-box}
-  body{margin:0;background:var(--bg);color:var(--fg);
-       font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans SC",sans-serif}
-  header{padding:20px 16px 8px;max-width:960px;margin:0 auto}
-  h1{font-size:20px;margin:0 0 4px;letter-spacing:.5px}
-  .sub{color:var(--muted);font-size:13px}
-  main{max-width:960px;margin:0 auto;padding:8px 16px 64px}
-  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
-        padding:16px;margin:14px 0}
-  .card h2{font-size:14px;margin:0 0 12px;color:var(--muted);font-weight:600;
-           text-transform:none;letter-spacing:.3px}
-  /* 栅格：手机单列，平板两列，桌面三列 —— 与插件设置页同一套断点 */
-  .grid{display:grid;gap:12px;grid-template-columns:1fr}
-  @media (min-width:600px){ .grid{grid-template-columns:repeat(2,1fr)} }
-  @media (min-width:960px){ .grid{grid-template-columns:repeat(3,1fr)} }
-  .field{display:flex;flex-direction:column;gap:4px;min-width:0}
-  .field.wide{grid-column:1/-1}
-  @media (min-width:600px){ .field.span2{grid-column:span 2} }
-  @media (min-width:960px){ .field.span2{grid-column:span 2} }
-  label{font-size:13px;color:var(--muted)}
-  input,select,textarea{width:100%;padding:8px 10px;border:1px solid var(--line);
-    border-radius:8px;background:var(--bg);color:var(--fg);font:inherit;font-size:14px}
-  textarea{min-height:72px;resize:vertical;font-family:ui-monospace,Menlo,monospace;font-size:13px}
-  .hint{font-size:12px;color:var(--muted)}
-  .switch{display:flex;align-items:center;gap:10px;padding:8px 0}
-  .switch input{width:auto}
-  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
-  button{padding:9px 16px;border-radius:8px;border:1px solid var(--line);
-    background:var(--card);color:var(--fg);font:inherit;cursor:pointer}
-  button.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
-  button:disabled{opacity:.5;cursor:default}
-  .kv{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;font-size:14px}
-  .kv dt{color:var(--muted)}
-  .kv dd{margin:0}
-  .ok{color:var(--ok)} .warn{color:var(--warn)} .err{color:var(--err)}
-  #msg{font-size:13px;min-height:20px}
-  code{background:var(--line);padding:1px 5px;border-radius:4px;font-size:12px}
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+         font: 14px/1.55 system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; }
+  main { max-width: 1040px; margin: 0 auto; padding: 20px 16px 48px; }
+  header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  h1 { font-size: 20px; margin: 0; }
+  h2 { font-size: 15px; margin: 0 0 10px; }
+  .muted { color: var(--muted); }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin-top: 14px; }
+  .alert { border-radius: 10px; padding: 12px 14px; margin-top: 14px; }
+  .alert.ok { background: var(--ok-bg); color: var(--ok-fg); }
+  .alert.warn { background: var(--warn-bg); color: var(--warn-fg); }
+  .alert.err { background: var(--err-bg); color: var(--err-fg); }
+  .alert.info { background: var(--info-bg); color: var(--info-fg); }
+  .stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-top: 14px; }
+  .stat { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+  .stat .label { font-size: 12px; color: var(--muted); }
+  .stat .value { font-size: 18px; font-weight: 600; margin-top: 2px; font-variant-numeric: tabular-nums; }
+  .stat .sub { font-size: 12px; color: var(--muted); }
+  @media (max-width: 720px) { .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--line); vertical-align: top; white-space: nowrap; }
+  th { font-size: 12px; color: var(--muted); font-weight: 500; }
+  td.num, th.num { text-align: right; }
+  code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; }
+  .scroll { overflow-x: auto; }
+  ul.plain { list-style: none; padding: 0; margin: 0; }
+  ul.plain li { padding: 4px 0; }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  button { font: inherit; border-radius: 8px; padding: 7px 14px; cursor: pointer;
+           border: 1px solid var(--line); background: var(--card); color: var(--fg); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+  button:disabled { opacity: .55; cursor: default; }
+  button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  form .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 14px; }
+  @media (max-width: 720px) { form .grid { grid-template-columns: 1fr; } }
+  label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 3px; }
+  input, select { width: 100%; font: inherit; padding: 7px 9px; border-radius: 8px;
+                  border: 1px solid var(--line); background: var(--bg); color: var(--fg); }
+  input[type=checkbox] { width: auto; }
+  .check { display: flex; gap: 8px; align-items: center; color: var(--fg); font-size: 14px; }
+  .dl { display: grid; grid-template-columns: 1.1fr 1.1fr 2fr 1.2fr 1.2fr auto; gap: 8px; align-items: end; margin-bottom: 8px; }
+  @media (max-width: 720px) { .dl { grid-template-columns: 1fr 1fr; } }
+  .hint { font-size: 12px; color: var(--muted); margin-top: 4px; }
+  details > summary { cursor: pointer; font-weight: 600; }
+  #toast { min-height: 1.5em; }
 </style>
 </head>
 <body>
-<header>
-  <h1>ColaSeedBox · 保种组</h1>
-  <div class="sub">独立运行，不需要 MoviePilot。端口 <code>{{ port }}</code></div>
-</header>
 <main>
-
-  <div class="card">
-    <h2>状态</h2>
-    <dl class="kv" id="status">
-      <dt>运行中</dt><dd id="st-running">—</dd>
-      <dt>档位</dt><dd id="st-tier">—</dd>
-      <dt>周期</dt><dd id="st-cron">—</dd>
-      <dt>最近一轮</dt><dd id="st-last">—</dd>
-      <dt>覆盖 / 目标</dt><dd id="st-cover">—</dd>
-      <dt>缺口</dt><dd id="st-short">—</dd>
-    </dl>
-    <div class="row" style="margin-top:12px">
-      <button class="primary" id="btn-run">立即跑一轮</button>
-      <span id="msg"></span>
-    </div>
-  </div>
-
-  <form id="cfg">
-    <div class="card">
-      <h2>① 可乐PT API Key</h2>
-      <div class="grid">
-        <div class="field"><label>API Key</label><input name="api_key" type="password" autocomplete="off" spellcheck="false" placeholder="留空 = 不修改">
-          <span class="hint">在站点「账号 → Key → API Key」新建一把，范围勾「读取」和「下载」；接口说明见 <a href="https://www.colapt.com/api-docs" target="_blank" rel="noopener">www.colapt.com/api-docs</a></span></div>
-      </div>
-    </div>
-
-    <div class="card">
-      <h2>② 下载器</h2>
-      <div class="grid">
-        <div class="field"><label>保种加种到</label>
-          <select name="seedgroup_client_mode">
-            <option value="custom">用下面填的自定义下载器</option>
-            <option value="mp">用本站已配置下载器（独立版等同自定义）</option>
-          </select></div>
-        <div class="field"><label>只作用于某一台（留空=第一台）</label>
-          <input name="seedgroup_target_client" placeholder="qb1 / 10.0.0.5:8081"></div>
-        <div class="field"><label>保存路径（留空=下载器默认）</label>
-          <input name="seedgroup_save_path" placeholder="/home/qb1/qbittorrent/Downloads">
-          <span class="hint">恢复做种时填原目录 + 开「跳过校验」即可续种</span></div>
-        <div class="field wide"><label>自定义下载器</label>
-          <textarea name="seedgroup_clients_lines" placeholder="10.0.0.5:8081,admin,密码&#10;tr,10.0.0.6:9091,admin,密码"></textarea>
-          <span class="hint">每行 <code>地址,用户名,密码</code>；Transmission 写 <code>tr,地址,用户名,密码</code></span></div>
-      </div>
-    </div>
-
-    <div class="card">
-      <h2>⑤ 保种组</h2>
-      <div class="grid">
-        <div class="field"><label>保种档位</label>
-          <select name="seedgroup_tier">
-            <option value="2T">2T（2048 GiB）</option>
-            <option value="5T">5T</option>
-            <option value="10T">10T</option>
-            <option value="15T">15T</option>
-            <option value="20T">20T</option>
-            <option value="custom">自定义</option>
-            <option value="all">全站官种（有多少保多少）</option>
-          </select></div>
-        <div class="field"><label>自定义体积（100M / 100G / 1T）</label>
-          <input name="seedgroup_custom_gib" placeholder="2048"></div>
-        <div class="field"><label>运行间隔（cron 5 段）</label>
-          <input name="seedgroup_cron" placeholder="0 */6 * * *">
-          <span class="hint">支持 <code>0 */N * * *</code>（每 N 小时）与 <code>*/N * * * *</code>（每 N 分钟）</span></div>
-        <div class="field"><label>进种限流（同时下载上限）</label>
-          <input name="seedgroup_max_downloading" type="number" min="0" placeholder="5">
-          <span class="hint">0 = 不限制</span></div>
-        <div class="field"><label>下架清理</label>
-          <select name="seedgroup_prune_mode">
-            <option value="seed">只删种子，保留文件</option>
-            <option value="files">种子和文件一起删</option>
-            <option value="off">不清理</option>
-          </select></div>
-        <div class="field"><label>动态轮换：每轮删/补数量</label>
-          <input name="seedgroup_rotate_count" type="number" min="1" max="50" placeholder="5"></div>
-        <div class="field"><div class="switch"><input type="checkbox" name="seedgroup_skip_check" id="skip"><label for="skip">跳过校验</label></div>
-          <span class="hint">仅恢复做种时开；新下载开着会全部「丢失文件」</span></div>
-        <div class="field"><div class="switch"><input type="checkbox" name="seedgroup_rotate_files" id="rot"><label for="rot">轮换时连文件一起删</label></div></div>
-      </div>
-    </div>
-
-    <div class="card">
-      <h2>⑤-2 保种限速</h2>
-      <div class="grid">
-        <div class="field"><label>下载限速（KiB/s）</label><input name="limit_dl_kib" type="number" min="0" placeholder="0">
-          <span class="hint">0 = 不接管</span></div>
-        <div class="field"><label>上传限速（KiB/s）</label><input name="limit_up_kib" type="number" min="0" placeholder="0">
-          <span class="hint">0 = 不接管</span></div>
-        <div class="field wide"><label>每客户端单独限速</label>
-          <textarea name="limit_lines" placeholder="10.0.0.5:8081,1024,2048"></textarea>
-          <span class="hint">每行 <code>客户端名或地址,下载KiB/s,上传KiB/s</code></span></div>
-      </div>
-    </div>
-
+  <header>
+    <h1>可乐保种组 <span class="muted" style="font-weight:400">· Docker 版</span></h1>
     <div class="row">
-      <button class="primary" type="submit">保存配置</button>
-      <span id="save-msg" class="hint"></span>
+      <span class="muted" id="version"></span>
+      <button class="primary" id="run">立即运行</button>
     </div>
-  </form>
-</main>
-<script>
-const $ = s => document.querySelector(s);
-const form = $('#cfg');
-let KEYS = [];
+  </header>
 
-async function loadConfig(){
-  const r = await fetch('/api/config'); const c = await r.json();
-  KEYS = c.keys || [];
-  for (const [k,v] of Object.entries(c)){
-    const el = form.elements[k];
-    if (!el) continue;
-    if (el.type === 'checkbox') el.checked = !!v;
-    else el.value = v ?? '';
-  }
-  if (c.api_key_set) form.elements.api_key.placeholder = '已设置（留空 = 不修改）';
+  <div id="headline" class="alert info" role="status">加载中…</div>
+
+  <section class="stats" aria-label="概况">
+    <div class="stat"><div class="label">派单条数</div><div class="value" id="s-items">-</div><div class="sub" id="s-actions"></div></div>
+    <div class="stat"><div class="label">本服务管理</div><div class="value" id="s-owned">-</div><div class="sub" id="s-owned-size"></div></div>
+    <div class="stat"><div class="label">本轮新加 / 删除</div><div class="value" id="s-addrm">-</div><div class="sub" id="s-gate"></div></div>
+    <div class="stat"><div class="label">申报空间</div><div class="value" id="s-cap">-</div><div class="sub" id="s-next"></div></div>
+  </section>
+
+  <section class="card" id="errors-card" hidden>
+    <h2>错误（按原因码）</h2>
+    <ul class="plain" id="errors"></ul>
+  </section>
+
+  <section class="card" id="skipped-card" hidden>
+    <h2>本轮跳过</h2>
+    <ul class="plain" id="skipped"></ul>
+  </section>
+
+  <section class="card">
+    <h2>本服务加的种子</h2>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>info_hash</th><th>种子</th><th class="num">大小</th><th>下载器</th><th>加入时间</th></tr></thead>
+        <tbody id="owned"><tr><td colspan="5" class="muted">加载中…</td></tr></tbody>
+      </table>
+    </div>
+    <p class="hint">只有这里列出的种子（本服务加的、带专用标签、在专用目录里）会在站点收回派单时被删除。下载器里已有的同一颗种子、你自己的种子、别站的种子都不会被碰。</p>
+  </section>
+
+  <section class="card">
+    <details id="cfg-details">
+      <summary>设置</summary>
+      <form id="cfg" autocomplete="off" style="margin-top:14px">
+        <div class="grid">
+          <div>
+            <label for="api_key">可乐PT API Key</label>
+            <input id="api_key" name="api_key" type="password" placeholder="留空 = 不改">
+            <div class="hint" id="api_key_hint">在站点「账号 → Key → API Key」新建，只勾「保种组（seedgroup）」范围。</div>
+          </div>
+          <div>
+            <label for="site_url">站点地址</label>
+            <input id="site_url" name="site_url" type="url">
+            <div class="hint">一般不用改。改了地址要同时重新填 API Key。</div>
+          </div>
+          <div>
+            <label for="save_path">专用保存目录（下载器视角）</label>
+            <input id="save_path" name="save_path">
+          </div>
+          <div>
+            <label for="tag">专用标签</label>
+            <input id="tag" name="tag">
+          </div>
+          <div>
+            <label for="interval">运行间隔（分钟，≥ 10）</label>
+            <input id="interval" name="interval" type="number" min="10" max="1440">
+          </div>
+          <div class="row" style="align-items:end">
+            <div style="flex:1"><label for="max_adds">每轮最多加种（≤ 50）</label><input id="max_adds" name="max_adds" type="number" min="0" max="50"></div>
+            <div style="flex:1"><label for="max_deletes">每轮最多删种（≤ 20）</label><input id="max_deletes" name="max_deletes" type="number" min="0" max="20"></div>
+          </div>
+          <label class="check"><input id="enabled" name="enabled" type="checkbox"> 启用</label>
+          <label class="check"><input id="delete_files" name="delete_files" type="checkbox"> 站点收回时连文件一起删（内容被别的种子共用时只删种子）</label>
+        </div>
+
+        <h2 style="margin-top:18px">下载器</h2>
+        <div id="dls"></div>
+        <button type="button" id="add-dl">添加下载器</button>
+        <div class="hint">地址写容器能访问到的地址，例如 <code>http://192.168.1.10:8080</code>；Transmission 默认路径 <code>/transmission/rpc</code>。密码留空 = 沿用已保存的（改了地址或用户名就要重填）。多台时新种加到本服务管理最少的那台。</div>
+
+        <div class="row" style="margin-top:16px">
+          <button class="primary" type="submit">保存</button>
+          <span id="toast" class="muted" role="status"></span>
+        </div>
+        <p class="hint">实例 ID：<span class="mono" id="instance_id"></span></p>
+      </form>
+    </details>
+  </section>
+</main>
+
+<template id="dl-row">
+  <div class="dl">
+    <div><label>名称</label><input data-k="name" placeholder="qb1"></div>
+    <div><label>类型</label>
+      <select data-k="type"><option value="qbittorrent">qBittorrent</option><option value="transmission">Transmission</option></select></div>
+    <div><label>地址</label><input data-k="url" placeholder="http://192.168.1.10:8080"></div>
+    <div><label>用户名</label><input data-k="username"></div>
+    <div><label>密码</label><input data-k="password" type="password"></div>
+    <div><button type="button" data-rm>删除</button></div>
+  </div>
+</template>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const fmtTime = (t) => t ? new Date(t * 1000).toLocaleString("zh-CN", {hour12: false}) : "-";
+const ACTION = {keep: "保持", add: "新派", remove: "收回"};
+const TRIGGER = {startup: "启动后", schedule: "定时", manual: "手动"};
+
+async function api(path, opts = {}) {
+  const r = await fetch(path, {headers: {"Content-Type": "application/json"}, ...opts});
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok) throw Object.assign(new Error("http " + r.status), {body});
+  return body;
 }
-async function loadStatus(){
-  const r = await fetch('/api/status'); const s = await r.json();
-  $('#st-running').textContent = s.running ? '正在跑' : (s.enabled ? '待命' : '未启用');
-  $('#st-running').className = s.running ? 'warn' : (s.enabled ? 'ok' : 'err');
-  $('#st-tier').textContent = s.tier || '—';
-  $('#st-cron').textContent = s.cron || '—';
-  const l = s.last;
-  if (!l){ $('#st-last').textContent = '还没跑过'; $('#st-cover').textContent='—'; $('#st-short').textContent='—'; return; }
-  const t = new Date(l.at*1000).toLocaleString();
-  $('#st-last').textContent = `${t} · ${l.ok ? '成功' : '失败'} · ${l.message}`;
-  $('#st-cover').textContent = (l.covered_gib ?? '—') + ' / ' + (l.target_gib ?? '—') + ' GiB';
-  $('#st-short').textContent = (l.shortfall_gib ?? '—') + ' GiB';
-  $('#st-short').className = (l.shortfall_gib > 0) ? 'warn' : 'ok';
-}
-form.addEventListener('submit', async e => {
-  e.preventDefault();
-  const body = {};
-  for (const k of KEYS){
-    const el = form.elements[k];
-    if (!el) continue;
-    if (el.type === 'checkbox') body[k] = el.checked;
-    else if (el.type === 'number') body[k] = Number(el.value || 0);
-    else {
-      if (k === 'api_key' && !el.value) continue;
-      body[k] = el.value;
-    }
+
+function renderStatus(s) {
+  $("version").textContent = "v" + s.version;
+  const h = $("headline");
+  const last = s.last;
+  let cls = "info", text;
+  if (!s.configured) {
+    text = "还没配置好：" + s.missing.map((m) => m.text).join("、") + "。在下方「设置」里填好后保存。";
+    cls = "warn";
+    $("cfg-details").open = true;
+  } else if (!last) {
+    text = s.running ? "正在运行第一轮…" : "还没有运行过";
+  } else {
+    text = fmtTime(last.finished_at) + " · " + (TRIGGER[last.trigger] || "") + " · " + last.status_text;
+    if (last.outdated) text += `（站点要求 ≥ ${last.min_plugin_version}，当前 ${s.version}，请更新）`;
+    if (last.status === "ok" && !last.state_reported) text += " · 状态上报失败";
+    else if (last.status === "ok") text += " · 状态已上报";
+    cls = last.status === "ok" ? (last.errors.length ? "warn" : "ok") : (["outdated", "stopped", "busy"].includes(last.status) ? "warn" : "err");
+    if (s.running) text += " · 正在运行…";
   }
-  const r = await fetch('/api/config', {method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
-  $('#save-msg').textContent = r.ok ? '已保存' : '保存失败';
-  setTimeout(()=>{ $('#save-msg').textContent='' }, 2500);
-  loadStatus();
-});
-$('#btn-run').addEventListener('click', async () => {
-  $('#btn-run').disabled = true; $('#msg').textContent = '跑一轮中…';
-  try{
-    const r = await fetch('/api/run', {method:'POST'}); const d = await r.json();
-    $('#msg').textContent = d.ok ? ('完成：' + d.message) : ('失败：' + d.message);
-  } finally { $('#btn-run').disabled = false; loadStatus(); }
-});
-loadConfig(); loadStatus();
-setInterval(loadStatus, 15000);
+  h.className = "alert " + cls;
+  h.textContent = text;
+
+  $("s-items").textContent = last && last.items != null ? last.items : "-";
+  $("s-actions").textContent = last ? Object.entries(last.action_counts || {}).map(([k, v]) => `${ACTION[k] || k} ${v}`).join(" · ") : "";
+  $("s-owned").textContent = s.owned_count + " 个";
+  $("s-owned-size").textContent = s.owned_total_text;
+  $("s-addrm").textContent = last ? `${last.added} / ${last.removed}` : "-";
+  $("s-gate").textContent = last && last.status === "ok" ? (last.deletes_allowed ? "删种闸门：开" : "删种闸门：关") : "";
+  $("s-cap").textContent = last ? last.capacity_text : "-";
+  $("s-next").textContent = s.next_run_at ? "下一轮 " + fmtTime(s.next_run_at) : (s.running ? "运行中" : "");
+
+  const errs = last ? last.errors : [];
+  $("errors-card").hidden = !errs.length;
+  $("errors").innerHTML = errs.map((e) => `<li>${esc(e.where)}：${esc(e.text)} <code>${esc(e.code)}</code></li>`).join("");
+  const sk = last ? last.skipped : [];
+  $("skipped-card").hidden = !sk.length;
+  $("skipped").innerHTML = sk.map((e) => `<li>${esc(e.text)} × ${e.count} <code>${esc(e.code)}</code></li>`).join("");
+
+  $("owned").innerHTML = s.owned.length ? s.owned.map((o) => `<tr>
+      <td class="mono" title="${esc(o.info_hash)}">${esc(o.info_hash.slice(0, 12))}</td>
+      <td>${esc(o.torrent_id)}</td><td class="num">${esc(o.size_text)}</td>
+      <td>${esc(o.downloader)}</td><td>${esc(fmtTime(o.added_at))}</td></tr>`).join("")
+    : `<tr><td colspan="5" class="muted">本服务还没有加过种子</td></tr>`;
+  $("run").disabled = s.running || !s.configured;
+}
+
+function dlRow(d = {}) {
+  const node = $("dl-row").content.firstElementChild.cloneNode(true);
+  for (const el of node.querySelectorAll("[data-k]")) {
+    const k = el.dataset.k;
+    if (k === "password") el.placeholder = d.password_set ? "已保存（留空 = 不改）" : "";
+    else if (d[k] != null) el.value = d[k];
+  }
+  node.querySelector("[data-rm]").onclick = () => node.remove();
+  $("dls").appendChild(node);
+}
+
+function fillConfig(c) {
+  for (const k of ["site_url", "save_path", "tag", "interval", "max_adds", "max_deletes"]) $(k).value = c[k];
+  $("enabled").checked = !!c.enabled;
+  $("delete_files").checked = !!c.delete_files;
+  $("api_key").value = "";
+  $("api_key").placeholder = c.api_key_set ? "已保存（留空 = 不改）" : "还没填";
+  $("instance_id").textContent = c.instance_id;
+  $("dls").innerHTML = "";
+  (c.downloaders.length ? c.downloaders : [{}]).forEach(dlRow);
+}
+
+const NOTE = {api_key_cleared_site_changed: "站点地址变了，旧 API Key 已清除，请重新填写"};
+async function save(ev) {
+  ev.preventDefault();
+  const body = {
+    site_url: $("site_url").value, save_path: $("save_path").value, tag: $("tag").value,
+    interval: +$("interval").value, max_adds: +$("max_adds").value, max_deletes: +$("max_deletes").value,
+    enabled: $("enabled").checked, delete_files: $("delete_files").checked,
+    downloaders: [...$("dls").children].map((row) => Object.fromEntries(
+      [...row.querySelectorAll("[data-k]")].map((el) => [el.dataset.k, el.value.trim()])))
+      .filter((d) => d.name || d.url),
+  };
+  if ($("api_key").value.trim()) body.api_key = $("api_key").value.trim();
+  try {
+    const c = await api("/api/config", {method: "POST", body: JSON.stringify(body)});
+    fillConfig(c);
+    const notes = (c.notes || []).map((n) => NOTE[n] || (n.startsWith("password_cleared:") ? `下载器 ${n.split(":")[1]} 改了地址或用户名，密码已清除，请重填` : n));
+    $("toast").textContent = "已保存，马上运行一轮。" + notes.join("；");
+    refresh();
+  } catch (e) {
+    const err = (e.body && e.body.error) || {};
+    $("toast").textContent = `保存失败：${err.field || ""} ${err.code || e.message}`;
+  }
+}
+
+async function refresh() {
+  try { renderStatus(await api("/api/status")); } catch (e) { $("headline").textContent = "面板连不上服务：" + e.message; }
+}
+
+$("run").onclick = async () => {
+  $("run").disabled = true;
+  try { await api("/api/run", {method: "POST", body: "{}"}); } finally { setTimeout(refresh, 800); }
+};
+$("add-dl").onclick = () => dlRow();
+$("cfg").addEventListener("submit", save);
+api("/api/config").then(fillConfig);
+refresh();
+setInterval(refresh, 5000);
 </script>
 </body>
 </html>

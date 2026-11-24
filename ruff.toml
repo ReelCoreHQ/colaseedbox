@@ -1,0 +1,10 @@
+line-length = 120
+target-version = "py312"
+extend-exclude = ["app/seedgroup/engine.py", "app/seedgroup/site.py", "app/seedgroup/clients.py", "app/seedgroup/torrent.py"]
+
+[lint]
+select = ["E", "F", "W", "I", "B", "S"]
+ignore = ["S101", "S105", "S106", "S603", "S607", "S404", "B008"]
+
+[lint.per-file-ignores]
+"tests/*" = ["S", "I001", "E501"]

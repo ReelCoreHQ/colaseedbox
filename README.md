@@ -1,264 +1,114 @@
-# 可乐保种组 · MoviePilot 插件 + 独立服务
+# 可乐保种组 · Docker 版（colaseedgroup-docker）
 
-**一份源码，两种用法**：
+> 原名 colaseedbox。
 
-| 用法 | 适合谁 | 怎么装 |
-|---|---|---|
-| **MoviePilot 插件** | 已经有 MP，想用 MP 的下载器与整理 | 插件市场添加本仓库 |
-| **独立服务** | 不想装 MP，只要保种 | Docker，端口 **3006** |
+不装 MoviePilot 也能参加可乐PT 保种组：一个小容器，按站点**派单**把官种加进你的 qBittorrent / Transmission 长期做种，
+面板在端口 **3006**。
 
-两种形态跑的是**同一个文件** `plugins.v2/colaseedgroup/__init__.py`，版本号也只有一处：插件里的 `plugin_version`（当前 **0.3.0**）。不存在两份代码，也不会出现版本互相落后。
+它与 MoviePilot 插件 [moviepilot-plugin-colaseedgroup](https://github.com/ReelCoreHQ/moviepilot-plugin-colaseedgroup)
+跑的是**同一份执行器**（`app/seedgroup/`，从插件仓库逐字节搬来，见 [SYNC.md](SYNC.md)），规则完全一致；
+本仓库只有外壳：配置、定时运行、直连下载器、面板。用 MoviePilot 的请装插件，不要两个一起对同一个账号跑。
 
----
+- 站点决定派哪些种子给你（按你在站点申报的可提供空间、做种人少的优先）。
+- 每轮拉派单：缺的加、站点**明确收回**的删；上报下载器里这些种子的状态。
+- 保种奖励由站点按 tracker 实际观测到的做种情况、按体积计算，**不看这里的上报**。
 
-## 一、MoviePilot 插件
+## 准备
 
-MoviePilot → 设置 → 插件市场 → **添加仓库**：
+1. 在可乐PT「账号 → Key → API Key」（<https://www.colapt.com/account/tracker?tab=api>）新建一把 Key，只勾 **保种组（seedgroup）** 范围。
+2. 在站点保种组页面申报可提供空间（≥ 2 TiB）。
+3. 一台 qBittorrent 或 Transmission（可以多台），容器能访问到它的 WebUI / RPC。
 
-```
-https://github.com/ReelCoreHQ/moviepilot-plugin-colaseedgroup
-```
+## 安装
 
-刷新 → 找到「可乐保种组」→ 安装 → 启用。
-
-或用脚本：
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/ReelCoreHQ/moviepilot-plugin-colaseedgroup/main/install.sh | bash
-```
-
----
-
-## 二、独立服务（Docker，不需要 MP）
-
-### 一键装（推荐）
-
-在**要跑保种的机器**上执行：
+在要跑保种的机器上：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/ReelCoreHQ/moviepilot-plugin-colaseedgroup/main/install-box.sh | bash
+curl -fsSL https://raw.githubusercontent.com/ReelCoreHQ/colaseedgroup-docker/main/install.sh | bash
 ```
 
-装完打开 **http://<本机IP>:3006**，填 API Key 即可。
+脚本会检查 Docker → 下载代码到 `~/colaseedgroup-docker` → 构建镜像 → 起容器 → 等健康检查通过。
+重复跑就是升级，`data/` 里的配置保留。可选：`SG_DIR=/opt/sg SG_PORT=3007 bash install.sh`。
 
-**脚本做了什么**（看一眼心里有数）：检查 Docker → 下载代码到 `~/colaseedbox` → 写初始配置 → 构建镜像 → 起容器 → 等健康检查通过。
-
-**重复跑是安全的**：会更新代码并重建容器，`~/colaseedbox/data` 里的配置保留。
-
-### 带参数装
-
-qB 不在本机、或想换端口/档位：
+手动：
 
 ```bash
-BOX_PORT=3007 \
-BOX_QB=10.0.0.5:8080 BOX_QB_USER=qb1 BOX_QB_PASS=mypass \
-BOX_TIER=5T \
-BOX_KEY=rcapi_xxx \
-bash <(curl -fsSL https://raw.githubusercontent.com/ReelCoreHQ/moviepilot-plugin-colaseedgroup/main/install-box.sh)
+git clone --depth 1 https://github.com/ReelCoreHQ/colaseedgroup-docker.git
+cd colaseedgroup-docker
+docker compose up -d --build
 ```
 
-| 变量 | 默认 | 说明 |
-|---|---|---|
-| `BOX_DIR` | `~/colaseedbox` | 装到哪 |
-| `BOX_PORT` | `3006` | 面板端口 |
-| `BOX_QB` | `127.0.0.1:8081` | qB 地址 |
-| `BOX_QB_USER` / `BOX_QB_PASS` | `admin` / `adminadmin` | qB 凭据 |
-| `BOX_TIER` | `2T` | 档位（2T/5T/10T/15T/20T/all/custom） |
-| `BOX_KEY` | 空 | API Key，不填就装完在面板里填 |
+装好后打开 `http://<本机IP>:3006` →「设置」：填 API Key、下载器，保存后立即跑一轮。
 
-### 手动装（想自己控制每一步）
-
-```bash
-git clone --depth 1 https://github.com/ReelCoreHQ/moviepilot-plugin-colaseedgroup.git
-cd moviepilot-plugin-colaseedgroup
-docker compose up -d
-```
-
-> **必须 clone 整个仓库**。`docker-compose.yml` 里是 `build: .`，需要同目录的 `Dockerfile`、`requirements.txt`、`app/`、`templates/`。只 curl 一个 compose 文件会报 `failed to read dockerfile: open Dockerfile: no such file or directory`。
-
-没有 git 的机器：
-
-```bash
-curl -fsSL https://github.com/ReelCoreHQ/moviepilot-plugin-colaseedgroup/archive/refs/heads/main.tar.gz | tar xz
-cd moviepilot-plugin-colaseedgroup-main
-docker compose up -d
-```
-
-### 连宿主机上的 qB
-
-**最容易踩的坑**：容器里的 `127.0.0.1` 是**容器自己**，不是宿主机。
-
-| 写法 | 结果 |
-|---|---|
-| `127.0.0.1:8081` | ❌ 连不上（容器里没 qB） |
-| `host.docker.internal:8081` | ✅ 需在 compose 打开 `extra_hosts`（一键脚本已打开） |
-| **宿主机真实 IP**`192.168.1.10:8081` | ✅ 最直接 |
-
-qB 必须监听 `0.0.0.0`（默认就是），只绑 `127.0.0.1` 的话容器进不来。
-
-### 常见问题
-
-**面板打开是空白 / 502？**
-`docker logs colaseedbox` 看原因。多数是端口被占（换 `BOX_PORT`）或容器没起（`docker compose up -d` 重试）。
-
-**连通性检测报「没有可用下载器」？**
-这条是误报（检测的是辅种的下载器列表，不是保种组的）。看下方「保种组状态」里的 `report_ok` 才是真的。
-
-**qB 用户名密码不对？**
-面板 →「下载器」那一行改，格式 `地址,用户名,密码`。改了保存就会重连。
-
-**想升级？**
-重跑一键脚本即可。
-
----
-
-## 三、两者共有的行为
-
-## 怎么接站点：API Key
-
-插件只用可乐PT 的**开放 API**（接口说明见 <https://www.colapt.com/api-docs>），不再用账号密码 + 验证码登录：
-
-1. 在站点「账号 → Key → API Key」（<https://www.colapt.com/account/tracker?tab=api>）新建一把 Key，范围勾**读取**和**下载**；
-2. 粘到插件设置（独立版是配置页）的「API Key」里保存。
-
-| 用途 | 开放 API | 范围 |
-|---|---|---|
-| 拉官方资源池 | `listMedia`（`GET /api/v1/media?official=true&view=torrents`） | 读取 |
-| 下架核对 | `getTorrent`（`GET /api/v1/torrents/{id}`） | 读取 |
-| 取种子 | `createDownloadLink`（`POST /api/v1/torrents/{id}/download-links`）签一条 30 分钟直链，再不带 Key 取文件 | 下载 |
-| 连通检测（显示等级名） | `personalStats`（`GET /api/v1/me/stats`） | 读取 |
-| 领上报票据 | `enrollPluginKey`（`POST /api/v1/plugin/keys`） | 读取 |
-
-请求只带 `X-API-Key`，不带 Cookie / CSRF / Origin。Key 无效（401）或缺范围（403 `api_key_scope_denied`）时插件发一条通知。
-上报本身仍只认站点签发的两小时票据 + 实例签名（见下）；票据被撤销时插件用 API Key 自动重领。
-
-## 谁能用
-
-任何会员都能开保种组、都会上报。**是否进考核由站点按每次上报时的账号身份判定**（「工作组-保种」成员的数据进考核，其余只留档），插件不再自己读工作组头衔，也不会因为头衔把开关关掉。
-
----
-
-## 档位
-
-| 档位 | 目标体积 |
-|---|---|
-| 2T / 5T / 10T / 15T / 20T | 2048 / 5120 / 10240 / 15360 / 20480 GiB |
-| 自定义 | 自己填，支持 `100M` `100G` `1T` `1P`（不带单位按 GiB），范围 1 GiB–1 PiB |
-| **全站官种** | 有多少保多少——目标 = 站点官方池的总量，池子涨目标跟着涨 |
-
-**「只能超，不能少」**：插件按最合适的组合挑种子，保证总量 ≥ 目标；单颗比剩余缺口还大时挑其中最小的那颗。
-
----
-
-## 每轮做什么
-
-1. 拉站点**官方**资源池（只保官方种，非官方一颗都不碰）；
-2. 对已在客户端且带「可乐保种组」标签的，实测覆盖体积；
-3. 缺口 > 0 → 从池子里挑种子补进来（每颗之间停 0.7 秒，避开站点下载限流）；
-4. **动态保种（强制开启）**：体积达标后，每轮删掉**做种人数最多**的 N 颗、补进**做种人数最少**的 N 颗（默认 5，可调 1–50）。「轮换时连文件一起删」默认勾选；
-5. **下架清理**：回站核对状态，已下架/撤销官方标记的从本地删掉（默认只删种子保留文件）；
-6. 把本轮结果报给站点（见下）。
-
-### 读数失败怎么算
-
-弱网环境下一次读不到客户端是常态，**不会**直接把覆盖打成 0：
-
-| 连续失败轮数 | 行为 |
-|---|---|
-| 第 1–2 轮 | 沿用上次成功读数，覆盖不变 |
-| 第 3 轮起 | 判为掉线，覆盖如实记 0，日志与面板都标明 |
-
-站点侧看到的是「掉线」标记，而不是凭空归零的数字。
-
----
+> **从 0.5.x 升级**：0.5.x 用的站点接口已经下线，旧配置（档位、动态保种、`seedgroup_*` 那一套）不再读取。
+> 在面板里重新填一遍 API Key（要勾 seedgroup 范围）和下载器即可。旧版加的种子不归新版管，新版不会删它们。
 
 ## 设置项
 
-| 字段 | 说明 |
+| 设置 | 说明 |
 |---|---|
-| 保种档位 | 见上；默认 **2T** |
-| 自定义体积 | 仅「自定义档」生效 |
-| 保种运行间隔 | cron，5 段，默认 `0 */6 * * *`；写错会静默按每 6 小时跑 |
-| 进种限流 | 客户端里「正在下载」的种子达到这个数就不再进种；**0 = 不限制** |
-| 保种下载器 | 用 MP 已配置下载器 / 用下面填的自定义下载器 |
-| 保种加到哪台 | **留空**：加种进第一台，覆盖体积/限速/下架清理遍历**全部**客户端；**填某台**：四种动作都只作用于那一台 |
-| 保存路径 | 填了就用这个目录；**恢复做种时填原下载目录 + 开「跳过校验」即可直接续种，不会重新下载** |
-| 保种组：跳过校验 | 默认**关**。只在「文件已经在磁盘上、只是种子丢了」的恢复场景打开——保种是从站点新下载的，开着它 qB 会以为文件已完整，全部变成「丢失文件」、进度 0% |
-| 下架清理 | 只删种子保留文件（默认）/ 种子和文件一起删 / 不清理 |
-| 动态保种：每轮删/补数量 | 强制开启，默认 5（1–50） |
-| 轮换时连文件一起删 | 默认勾选；取消则只删种子、保留文件 |
-| 保种组自定义下载器 | 每行 `地址,用户名,密码`；Transmission 写 `tr,地址,用户名,密码`。**不与 MP 下载器并集** |
+| API Key | 上面那把 Key。保存后只显示「已保存」，接口与面板都不回显 |
+| 站点地址 | 默认 `https://www.colapt.com`，一般不用改。**改了地址必须同时重填 Key**，否则旧 Key 会被清掉 |
+| 下载器 | 名称（字母开头）、类型、地址、用户名、密码。地址写容器视角，例如 `http://192.168.1.10:8080`；Transmission 默认路径 `/transmission/rpc`。改了地址或用户名必须重填密码 |
+| 专用保存目录 | 下载器视角的路径，默认 `/downloads/colaseedgroup`；只放保种组的种子 |
+| 专用标签 | 默认「可乐保种组」 |
+| 运行间隔 | 默认 30 分钟，最少 10 分钟 |
+| 每轮最多加种 / 删种 | 默认 5 / 5，上限 50 / 20 |
+| 收回时连文件一起删 | 默认开；内容被别的种子共用（辅种）时只删种子 |
 
-> ⚠️ 用 MP 下载器保种时，MP 的整理会改名/移动文件，导致做种中断。建议在 MP「设置 → 目录/整理」把整理方式设为**硬链接**，或改用「自定义下载器」专门保种。
+**连宿主机上的下载器**：容器里的 `127.0.0.1` 是容器自己。用宿主机局域网 IP，或在 compose 里打开
+`extra_hosts: host.docker.internal:host-gateway`（一键脚本已打开）后写 `http://host.docker.internal:8080`。
 
----
+## 会做什么、不会做什么
 
-## 保种限速（只作用于本插件）
+与插件同一套硬规则（不提供开关）：
 
-| 字段 | 说明 |
+- **只删自己的**：只有本服务加种成功时记过账的种子，并且它仍在原下载器、仍带专用标签、仍在专用目录下，
+  站点在本轮派单里明确收回时才会删除。你改了标签或挪出专用目录，就视为你接手了，不再删它。
+- **不接管**：派来的种子如果下载器里本来就有（你自己加的、辅种工具加的），只上报「已存在」，不记账、不删。
+- **出错不删**：站点连不上、返回错误或不合规、派单版本倒退、任一下载器列不出种子时，本轮一个都不删。
+- **有上限**：每轮加种、删种都有上限；加种失败按 1 小时 / 4 小时 / 1 天退避。
+- **不碰别的**：不改任何限速（只读上报），不动派单以外的任何种子（包括别站、馒头的种子）。
+- **版本门槛由站点下发**：低于站点要求时只上报、不加不删，面板会提示更新。
+
+## 面板
+
+- 上次运行：时间、结果、状态是否已上报；出错时按原因码显示（如 `http_403:api_key_scope_denied`），不显示站点原文。
+- 派单条数（保持 / 新派 / 收回）、本服务管理的种子数与总体积、本轮新加 / 删除、申报空间；体积自动换算单位。
+- 本服务加的种子列表；本轮跳过的原因（已存在不接管、达到上限、退避中……）。
+- 「立即运行」按钮。
+
+面板**没有登录**：请只在可信的局域网里开放 3006，或把 compose 里的端口改成 `127.0.0.1:3006:3006` 再用 SSH 隧道访问。
+面板改不出秘密：Key 与下载器密码永不回显，改站点地址 / 下载器地址都必须同时重填对应的秘密。
+
+## 数据与隐私
+
+数据在 `data/`（容器里的 `/data`），文件权限 0600：
+
+| 文件 | 内容 |
 |---|---|
-| 保种下载 / 上传限速（KiB/s） | 全局默认；留空或 0 = 这一向不接管 |
-| 每客户端单独限速 | 每行 `客户端名或地址,下载KiB/s,上传KiB/s`，例：`10.0.0.5:8081,1024,2048` |
+| `config.json` | 站点地址、API Key、实例 ID、下载器（含密码）、目录 / 标签 / 间隔 / 上限 |
+| `state.json` | 账本：本服务加过的种子、上次派单版本、加种退避 |
+| `last_run.json` | 上一轮结果 |
 
-- **只对保种组生效**，不碰辅种的客户端限速；
-- 匹配「精确优先、再按长度降序包含」：写 `10.0`、`MP-qb` 都能命中，短键不会劫持精确键；没列出的客户端用全局值，全局也是 0 就不接管它；
-- 填了才强行接管，每轮保种同步重新下发（手改会被改回）。
-
----
-
-## 保种情况上报（强制）与组长审核
-
-开了保种组的账号，每轮把下面这些报给站点：
-
-**档位、范围、覆盖体积、缺口、是否达标、最老那颗已做种多久、插件版本、每台客户端此刻的限速**（没限速也照报，多台逐台报，最多 32 台）。
-
-这份数据只用于**工作组长审核岗位**：
-
-- 站点管理后台 →「保种组」页（只有**工作组-组长**和 admin 能看）；
-- 页面按「每人最新一条」显示：保种体积、**本月保种时长**、每台客户端限速；
-- 本月时长只累计「覆盖达标」的相邻上报区间，**单段按 7 小时封顶**；
-- **不足「当月已流逝时长的 5/6」→ 当月岗位奖励不发**（月底正好等于整月 5/6）。只呈现事实，不扣已到手的做种收益；
-- 面板上「被限速」的判据是：任一客户端**已启用**上传限速且低于 1024 KiB/s——同样只标记、不处罚。
-
----
+日志不写 API Key、下载器密码、下载器地址、签名下载链接。报给站点的只有：派单种子的状态与进度、
+每台下载器的限速读数（名字用「类型#序号」）、版本号与实例 ID。
 
 ## 常见问题
 
-**升级到 0.3.0 后提示「还没填 API Key」？**
-0.3.0 起插件改用开放 API，账号密码 + 验证码那套登录站点会删掉。按上面「怎么接站点」建一把勾「读取」「下载」的 Key 填进来即可，旧的账号密码字段会被忽略。
+- **403 `api_key_scope_denied`**：Key 没勾 seedgroup 范围；**403 `permission_denied`**：你还不在保种组。
+- **409 `state_conflict`**：还没在站点申报可提供空间。
+- **下载器连不上（`unavailable`）**：检查地址是不是容器视角、qB 是否监听 0.0.0.0、用户名密码。
+- **种子一直在下载**：保种组的种子要先从别的成员那里下完整才开始做种；保证下载器能连上 tracker。
+- **我想退出**：在站点把可提供空间调为 0 或退出保种组，站点会逐步收回派单，这里按每轮上限删除。
 
-**提示 API Key 不能用？**
-401 是 Key 填错、被撤销或过期；403 `api_key_scope_denied` 是缺范围。重建一把两项都勾上的 Key。
-
-**显示缺很多，但站点明明有那么多官种？**
-插件只保**官方**种。官方池本身小于档位时，如实显示缺口——这是事实。
-
-**恢复了种子却显示 0 做种？**
-把「保存路径」指到文件原目录 + 开「跳过校验」；路径不对会变成重新下载。
-
-**动态保种会把我保的种子删掉吗？**
-只在**达到档位后**轮换，删的是站点侧做种人数最多（最不缺人）的那些，同时补进同等数量最少的。没达标只补不删。
-
-**MoviePilot 崩溃重启？**
+## 开发
 
 ```bash
-docker logs moviepilot-v2 2>&1 | grep -A 60 "Fatal Python error" | tail -60
+python -m pip install -r requirements-dev.txt
+python -m unittest discover -s tests -v
+ruff check .
+python scripts/check_vendor.py --source ../moviepilot-plugin-colaseedgroup
 ```
 
----
-
-## 安全与隐私
-
-插件仓库**不含任何凭据**；可乐 API Key、下载器密码全部只存在你自己的 MoviePilot（或独立版的 `data/`）里。
-
-保种组上报**不含**账号密码、passkey、文件名或任何下载内容；**含**每台客户端的名称/地址与限速数值（身份由上报票据决定，站点自己记）。只有开了保种组的账号会报。
-
-插件凭据（站点下发的两小时票据 + 实例签名密钥）保存在 MP 插件数据里，用于向站点上报。
-
----
-
-## 相关链接
-
-- 辅种插件：[moviepilot-plugin-colapt](https://github.com/ReelCoreHQ/moviepilot-plugin-colapt)
-- 使用文档：[可乐PT Wiki · 保种组](https://www.colapt.com/wiki/moviepilot-seedgroup)
-- 站点：[www.colapt.com](https://www.colapt.com)
+执行器逻辑不在这里改，见 [SYNC.md](SYNC.md)。
