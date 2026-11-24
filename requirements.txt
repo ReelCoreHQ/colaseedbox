@@ -1,4 +1,6 @@
+# 运行时依赖。下载器客户端与 MoviePilot 3.2.x 用的是同一套库、同一版本。
 fastapi==0.115.6
-uvicorn[standard]==0.34.0
-jinja2==3.1.5
-requests==2.32.3
+uvicorn==0.34.0
+requests==2.34.2
+qbittorrent-api==2026.6.0
+transmission-rpc==7.0.12

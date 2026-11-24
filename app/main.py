@@ -1,126 +1,111 @@
-"""独立版保种组服务：配置 UI + 面板 + 定时同步。
+"""可乐保种组 Docker 版（colaseedgroup-docker）：不需要 MoviePilot 的独立服务。
 
-不需要 MoviePilot：只对接站点（拉官种池、上报）和你自己填的 qB/TR（加种、读覆盖）。
-MP 那套「加种后自动刮削/整理」在独立版里没有——那是 MP 的职责，不是保种组的。
+执行器逻辑与 MoviePilot 插件 0.7.0 是同一份（app/seedgroup/，逐字节搬来）；
+这里是外壳：配置、定时运行、端口 3006 上的小面板。
 """
-from __future__ import annotations
 
-import datetime as dt
-import json
 import logging
 import os
 import threading
-import time
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse
-from fastapi.templating import Jinja2Templates
+from fastapi.responses import FileResponse, JSONResponse
 
-from .sync import CONFIG_KEYS, DEFAULTS, PLUGIN_VERSION, Syncer
+from . import view
+from .config import ConfigError, Store, merge_update, missing_fields, public_view
+from .runner import Runner
+from .seedgroup import VERSION
 
 BASE = Path(__file__).resolve().parent.parent
-CONFIG_PATH = Path(os.environ.get("COLASEEDBOX_CONFIG", str(BASE / "data" / "config.json")))
-PORT = int(os.environ.get("COLASEEDBOX_PORT", "3006"))
+DATA_DIR = Path(os.environ.get("COLASEEDGROUP_DATA", "/data"))
+PORT = int(os.environ.get("COLASEEDGROUP_PORT", "3006"))
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-log = logging.getLogger("colaseedbox")
+log = logging.getLogger("colaseedgroup")
+# uvicorn 的访问日志带客户端地址：不要
+logging.getLogger("uvicorn.access").disabled = True
 
-app = FastAPI(title="ColaSeedBox", version=PLUGIN_VERSION, docs_url="/api/docs", redoc_url=None)
-templates = Jinja2Templates(directory=str(BASE / "templates"))
-syncer = Syncer(CONFIG_PATH)
-
-
-# ---------- 调度 ----------
-
-def _parse_cron_interval(expr: str) -> int:
-    """只支持「每 N 小时」/「每 N 分钟」两种最常见写法，其余退回 1 小时。
-
-    独立版不做完整的 cron 解析：判断「下一次该什么时候跑」只需要一个间隔，
-    而用户的意图几乎都是「每小时/每 6 小时跑一次」。写坏了一律按 1 小时，
-    与插件的「写错静默按默认跑」保持同一个口径。
-    """
-    parts = (expr or "").split()
-    if len(parts) != 5:
-        return 3600
-    minute, hour = parts[0], parts[1]
-    if hour.startswith("*/"):
-        try:
-            return max(60, int(hour[2:]) * 3600)
-        except ValueError:
-            return 3600
-    if minute.startswith("*/"):
-        try:
-            return max(60, int(minute[2:]) * 60)
-        except ValueError:
-            return 3600
-    return 3600
+store = Store(DATA_DIR)
+runner = Runner(store)
 
 
-def _scheduler() -> None:
-    next_at = 0.0
-    while True:
-        try:
-            interval = _parse_cron_interval(syncer.load().get("seedgroup_cron", ""))
-            now = time.time()
-            if now >= next_at:
-                res = syncer.run_once()
-                log.info("同步完成 ok=%s %s", res.ok, res.message)
-                next_at = now + interval
-        except Exception as err:  # noqa: BLE001 - 调度线程不能死
-            log.error("调度异常：%s", err)
-        time.sleep(30)
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    os.umask(0o077)
+    if not os.access(DATA_DIR, os.W_OK):
+        log.error("数据目录 %s 对当前用户 uid=%s gid=%s 不可写：把宿主机上的 data 目录 chown 给这个 uid/gid，"
+                  "或在 compose 里把 PUID/PGID 改成目录主人的", DATA_DIR, os.getuid(), os.getgid())
+        raise SystemExit(1)
+    cfg = store.load()
+    log.info("可乐保种组 Docker 版 %s 启动，每 %s 分钟对齐一次", VERSION, cfg["interval"])
+    if os.environ.get("COLASEEDGROUP_NO_SCHEDULER") != "1":
+        runner.start()
+    yield
+    runner.stop()
 
 
-@app.on_event("startup")
-def _start() -> None:
-    log.info("ColaSeedBox 启动，配置 %s，端口 %s", CONFIG_PATH, PORT)
-    threading.Thread(target=_scheduler, name="scheduler", daemon=True).start()
+app = FastAPI(title="colaseedgroup-docker", version=VERSION, docs_url=None, redoc_url=None, openapi_url=None,
+              lifespan=lifespan)
 
 
-# ---------- 页面 ----------
-
-@app.get("/", response_class=HTMLResponse)
-def index(request: Request) -> HTMLResponse:
-    return templates.TemplateResponse("index.html", {"request": request, "port": PORT})
-
-
-# ---------- API ----------
-
-@app.get("/api/config")
-def get_config() -> dict:
-    cfg = syncer.load()
-    # API Key 只回传「是否已设置」，不回显明文
-    safe = {k: v for k, v in cfg.items() if k != "api_key"}
-    safe["api_key_set"] = bool(cfg.get("api_key"))
-    safe["keys"] = list(CONFIG_KEYS)
-    safe["defaults"] = DEFAULTS
-    return safe
+def _require_json(request: Request) -> None:
+    """改动类接口只收 application/json：浏览器跨站表单发不出这种请求（简单 CSRF 防护）。"""
+    ctype = request.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+    if ctype != "application/json":
+        raise HTTPException(415, "需要 application/json")
 
 
-@app.post("/api/config")
-async def set_config(request: Request) -> dict:
-    body = await request.json()
-    if not isinstance(body, dict):
-        raise HTTPException(400, "配置必须是 JSON 对象")
-    cfg = syncer.load()
-    for k, v in body.items():
-        if k in CONFIG_KEYS:
-            cfg[k] = v
-    return syncer.save(cfg)
-
-
-@app.get("/api/status")
-def status() -> dict:
-    return syncer.status()
-
-
-@app.post("/api/run")
-def run_now() -> dict:
-    res = syncer.run_once()
-    return {"ok": res.ok, "message": res.message, "at": res.at, "state": res.state}
+@app.get("/")
+def index() -> FileResponse:
+    return FileResponse(BASE / "templates" / "index.html", media_type="text/html; charset=utf-8",
+                        headers={"Cache-Control": "no-store"})
 
 
 @app.get("/api/health")
 def health() -> dict:
-    return {"ok": True, "service": "colaseedbox", "port": PORT, "version": PLUGIN_VERSION}
+    return {"ok": True, "service": "colaseedgroup-docker", "version": VERSION}
+
+
+@app.get("/api/status")
+def status() -> dict:
+    cfg = store.load()
+    return view.status(cfg, store.load_state(), store.load_last_run(), version=VERSION,
+                       running=runner.running, next_run_at=runner.next_run_at, missing=missing_fields(cfg))
+
+
+@app.get("/api/config")
+def get_config() -> dict:
+    return public_view(store.load())
+
+
+@app.post("/api/config")
+async def set_config(request: Request):
+    _require_json(request)
+    try:
+        body = await request.json()
+    except ValueError:
+        raise HTTPException(400, "不是合法 JSON") from None
+    if not isinstance(body, dict):
+        raise HTTPException(400, "配置必须是 JSON 对象")
+    try:
+        cfg, notes = merge_update(store.load(), body)
+        cfg = store.save(cfg)
+    except ConfigError as err:
+        return JSONResponse({"error": {"code": err.code, "field": err.field}}, status_code=422)
+    log.info("配置已保存")
+    runner.wake()
+    return {**public_view(cfg), "notes": notes}
+
+
+@app.post("/api/run")
+def run_now(request: Request) -> dict:
+    _require_json(request)
+    if runner.running:
+        return {"started": False, "status": "busy"}
+    missing = missing_fields(store.load())
+    if missing:
+        return {"started": False, "status": "not_configured", "missing": missing}
+    threading.Thread(target=runner.run_cycle, args=("manual",), name="colaseedgroup-run", daemon=True).start()
+    return {"started": True}
