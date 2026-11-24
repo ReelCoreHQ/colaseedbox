@@ -37,6 +37,17 @@ class AdapterTests(unittest.TestCase):
         self.assertEqual(_parse_add({"success_count": 0, "failure_count": 1}), (False, []))
         self.assertEqual(_parse_add(None), (False, []))
 
+    def test_qb_async_add_waits_until_visible(self):
+        from support import fake_qb
+
+        from app.seedgroup.clients import wrap
+        qb = fake_qb()
+        qb.qbc.async_add = True               # qB 的 add 回成功时种子还不在列表里
+        data, h = make_torrent("Async")
+        ok, _ = qb.add_torrent(content=data, download_dir="/d", tag=["t"])
+        self.assertTrue(ok)
+        self.assertEqual([t.info_hash for t in wrap("qb", "qbittorrent", qb).list_torrents()], [h])
+
     def test_tr_added_vs_duplicate(self):
         data, h = make_torrent("Film")
         inst = fake_tr({"result": "success", "arguments": {"torrent-added": {"hashString": h, "id": 1}}})
@@ -109,6 +120,16 @@ class ApiTests(unittest.TestCase):
 
     def test_run_requires_json(self):
         self.assertEqual(self.client.post("/api/run").status_code, 415)
+
+    def test_action_endpoint_validates(self):
+        self.assertEqual(self.client.post("/api/action", content="{}", headers={"Content-Type": "text/plain"}).status_code,
+                         415)
+        for body in ({"action": "nuke", "torrent_id": 1}, {"action": "resume"}, {"action": "resume", "torrent_id": "1"},
+                     {"action": "takeover", "torrent_id": 1}, {"action": "takeover", "torrent_id": 1, "confirm": "yes"}):
+            self.assertEqual(self.client.post("/api/action", json=body).status_code, 422, body)
+        r = self.client.post("/api/action", json={"action": "retry"})
+        self.assertIn(r.status_code, (200, 409))
+        self.assertIn("message", r.json())
 
     def test_index_served(self):
         r = self.client.get("/")

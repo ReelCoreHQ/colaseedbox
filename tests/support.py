@@ -107,26 +107,54 @@ class FakeQbc:
     def __init__(self):
         self.rows = []
         self.deleted = []
+        self.calls = []
+        self.adding = []
+        self.adding_polls = 0
+        self.async_add = False
         self.fail_list = False
 
-    def torrents_info(self):
+    def torrents_info(self, torrent_hashes=None):
         if self.fail_list:
             raise ConnectionError(f"http://{LAN}:8080 refused (password={QB_PASS})")
-        return [dict(r) for r in self.rows]
+        if self.adding:                       # 异步加种：第二次查询才出现在列表里
+            self.adding_polls += 1
+            if self.adding_polls >= 2:
+                self.rows += self.adding
+                self.adding = []
+        return [dict(r) for r in self.rows if not torrent_hashes or r["hash"] == torrent_hashes]
 
     def torrents_add(self, torrent_files, save_path, is_paused, tags, category, use_auto_torrent_management):
         from app.seedgroup.torrent import info_hash, torrent_name
         h, n = info_hash(torrent_files), torrent_name(torrent_files)
         if any(r["hash"] == h for r in self.rows):
             return "Fails."
-        self.rows.append({"hash": h, "name": n, "save_path": save_path, "content_path": f"{save_path}/{n}",
-                          "tags": ",".join(tags), "progress": 0, "state": "downloading", "size": 1024,
-                          "uploaded": 0})
+        row = {"hash": h, "name": n, "save_path": save_path, "content_path": f"{save_path}/{n}",
+               "tags": ",".join(tags), "progress": 0, "state": "downloading", "size": 1024, "uploaded": 0}
+        if self.async_add:
+            self.adding.append(row)
+            self.adding_polls = 0
+        else:
+            self.rows.append(row)
         return "Ok."
 
     def torrents_delete(self, delete_files, torrent_hashes):
         self.deleted.append((torrent_hashes, delete_files))
         self.rows = [r for r in self.rows if r["hash"] != torrent_hashes]
+
+    def _row(self, h):
+        return next(r for r in self.rows if r["hash"] == h)
+
+    def torrents_start(self, torrent_hashes):
+        self.calls.append(("start", torrent_hashes))
+        self._row(torrent_hashes)["state"] = "downloading"
+
+    def torrents_recheck(self, torrent_hashes):
+        self.calls.append(("recheck", torrent_hashes))
+
+    def torrents_add_tags(self, tags, torrent_hashes):
+        self.calls.append(("tag", torrent_hashes, tuple(tags)))
+        row = self._row(torrent_hashes)
+        row["tags"] = ",".join([t for t in row["tags"].split(",") if t] + list(tags))
 
     def app_preferences(self):
         return {"up_limit": 0, "dl_limit": 0, "alt_up_limit": 0, "alt_dl_limit": 0}
