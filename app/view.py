@@ -84,7 +84,7 @@ SITE_CODE_TEXT = {
 #: 跳过原因（skipped 里的值，冒号前那段）
 SKIP_TEXT = {
     "not_owned": "收回的不是本服务加的：不删",
-    "external": "下载器里本来就有：不接管",
+    "external": "下载器里本来就有：不自动接管",
     "already_gone": "已经不在下载器里：销账",
     "detached": "被挪出专用目录或去掉标签：视为你接手",
     "downloader_not_selected": "记录的下载器已不在配置里",
