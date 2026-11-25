@@ -160,7 +160,7 @@
   <p class="sync-line" id="auto" role="status"></p>
 
   <div id="headline" class="notice-bar">
-    <p><span class="tip-anchor" id="hl-time-wrap" hidden><span id="hl-time" class="has-tip" tabindex="0" aria-describedby="hl-time-tip"></span><span id="hl-time-tip" role="tooltip" class="tip-bubble"></span></span><span id="hl-text" role="status">加载中…</span></p>
+    <p><span class="tip-anchor" id="hl-time-wrap" hidden><span id="hl-time" class="has-tip" tabindex="0" aria-describedby="hl-time-tip"></span><span id="hl-time-tip" role="tooltip" class="tip-bubble"></span></span><span id="hl-text" role="status">加载中…</span> <a id="hl-link" class="site-link" href="https://www.colapt.com/account/seed-group" target="_blank" rel="noopener noreferrer" hidden>去申报空间 ↗</a></p>
   </div>
 
   <section class="stats" aria-label="概况">
@@ -578,6 +578,7 @@ function renderHeader(s) {
   const last = s.last;
   let tone = "", text;
   $("hl-time-wrap").hidden = !(s.configured && last);
+  $("hl-link").hidden = !(s.configured && last && last.needs_capacity);
   if (!s.configured) {
     tone = "warning";
     text = "还没配置好：" + s.missing.map((m) => m.text).join("、") + "。在下方「保种设置」里填好后保存。";
@@ -591,7 +592,9 @@ function renderHeader(s) {
     if (last.status === "ok") parts.push(last.state_reported ? "已上报" : "上报失败");
     if (s.running) parts.push("正在同步…");
     text = " · " + parts.join(" · ");
-    tone = last.status === "ok" ? (last.errors.length || !last.state_reported ? "warning" : "success")
+    // 没申报空间：站点照常给空派单、状态「正常」，不说「正常」，直接说下一步
+    if (last.needs_capacity) text = " · " + last.capacity_hint;
+    tone = last.needs_capacity ? "warning" : last.status === "ok" ? (last.errors.length || !last.state_reported ? "warning" : "success")
       : (["outdated", "stopped", "busy"].includes(last.status) ? "warning" : "error");
   }
   $("headline").className = "notice-bar" + (tone ? " notice-bar--" + tone : "");
@@ -619,7 +622,7 @@ function renderStats(s) {
   }).join("") : `<li class="muted">还没配置</li>`;
   setHTML($("s-dls"), html);
   const cap = s.last && s.last.capacity_text;
-  setText($("s-dl-sub"), [cap ? `申报 ${cap}` : "", st.pending_bytes ? `待加 ${st.pending_text}` : ""].filter(Boolean).join(" · "));
+  setText($("s-dl-sub"), [cap ? `申报 ${cap}` : (s.last && s.last.needs_capacity ? "未申报空间" : ""), st.pending_bytes ? `待加 ${st.pending_text}` : ""].filter(Boolean).join(" · "));
   const low = dls.filter((d) => d.low).map((d) => d.name);
   $("s-dl-warn").hidden = !low.length;
   setText($("s-dl-warn"), low.length ? `${low.join("、")} 的剩余空间少于还要加的 ${st.pending_text}` : "");
@@ -702,7 +705,7 @@ function renderAssignments(s) {
   view.warning = s.takeover_warning; view.now = s.now; view.byId = new Map();
   $("assign-total").textContent = g ? `${g.count} 条 · ${g.size_text}` : "";
   const empty = !g ? (!s.last ? "还没有运行过" : (s.last.status === "ok" ? "下一轮运行后显示全部派单" : "还没有拿到派单"))
-    : (!g.count ? "站点暂时没有派单" : "");
+    : (!g.count ? (s.last && s.last.needs_capacity ? "还没申报空间，所以没有派单" : "站点暂时没有派单") : "");
   $("assign-empty").hidden = !empty;
   setText($("assign-empty"), empty);
   const bar = g ? g.bar.filter((b) => b.count) : [];
@@ -1131,6 +1134,7 @@ async function refresh() {
   } catch (e) {
     $("headline").className = "notice-bar notice-bar--error";
     $("hl-time-wrap").hidden = true;
+    $("hl-link").hidden = true;
     setText($("hl-text"), "面板连不上服务：" + e.message);
   }
 }

@@ -184,6 +184,16 @@ class Box(unittest.TestCase):
         self.assertEqual(len(sess.posted()), 1)
 
     # ---------------- 面板数据 ----------------
+    def test_status_flags_missing_capacity(self):
+        # 站点对没申报空间的成员照常给空派单（状态「正常」），上报被 409 拒绝：面板要知道该指去申报
+        self.store.save_last_run({"status": "ok", "capacity_gib": 0, "items": 0, "finished_at": 1, "assignments": [],
+                                  "state_error": "http_409:state_conflict"})
+        last = self.status()["last"]
+        self.assertTrue(last["needs_capacity"])
+        self.assertIn("还没在站点申报可提供的空间", last["capacity_hint"])
+        self.store.save_last_run({"status": "ok", "capacity_gib": 500, "items": 0, "finished_at": 1, "assignments": []})
+        self.assertFalse(self.status()["last"]["needs_capacity"])
+
     def test_status_sizes_auto_scale(self):
         self.store.save_state({"owned": {"a" * 40: {"downloader": "qb1", "torrent_id": 1, "size": 50331648, "added_at": 1},
                                          "b" * 40: {"downloader": "qb1", "torrent_id": 2, "size": 67108864, "added_at": 2}}})
