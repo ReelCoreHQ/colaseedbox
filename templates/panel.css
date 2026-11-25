@@ -2,78 +2,86 @@
  * 面板与登录页共用的样式：设计档位、主题色与几样组件，逐条照搬 reelcore-ui（站点前端）的写法，
  * 因为这里没有构建步骤、不能引 Vue 组件。每段注明出处；改站点那边时按出处对照着改这里。
  *
- * 主题：浅色 = 站点的 cola-cream-red，深色（系统深色模式）= cola-black-red（src/styles/themes.css）。
+ * 主题：浅色 = 站点的 minimal 主题（src/styles/themes.css 的 :root[data-theme="minimal"]，站点上只有浅色）；
+ * 深色（跟系统）= 面板自己推出来的中性深色，推法见下面深色那段的注释。
  */
 
-/* ---- 主题色：src/styles/themes.css（cola-cream-red） ---- */
+/* ---- 主题色：src/styles/themes.css（:root[data-theme="minimal"]，逐项照搬；main.css 里没有针对 minimal 的覆盖） ---- */
 :root {
   color-scheme: light;
-  --background: #f6f0e7;
-  --surface: #fffaf2;
-  --surface-muted: #eee5dc;
-  --text: #241e1d;
-  --text-muted: #6b6059;
-  --link: #8e1720;
-  --border: #d9ccc0;
-  --line: #e5d9cd;
-  --control-border: #8a7366;
-  --success: #316946;
-  --warning: #795613;
-  --error: #a41420;
-  --accent: #c81d25;
-  --accent-text: #fffaf2;
-  --focus: #9a651b;
-  --radius: 8px;
-  --shadow: 0 3px 14px rgb(70 37 20 / 6%);
-  --header-surface: #fffaf2;
-  --table-head-surface: #f6f0e7;
-  --table-head-text: #66564b;
-  --table-stripe: #fffaf2;
-  --table-row-hover: #eee5dc;
-  --control-surface: #fffaf2;
-  --secondary-surface: #fffaf2;
-  --tag-surface: #eee1d4;
-  --tag-text: #66564b;
-  --primary-surface: #c81d25;
-  --primary-text: #fffaf2;
-  --primary-border: #a51a22;
-  --error-text: #fffaf2;
+  --background: #ffffff;
+  --surface: #ffffff;
+  --surface-muted: #f5f5f5;
+  --text: #202020;
+  --text-muted: #616161;
+  --link: #303030;
+  --border: #dedede;
+  --control-border: #808080;
+  --line: #ebebeb;
+  --success: #267048;
+  --warning: #995119;
+  --accent: #303030;
+  --accent-text: #ffffff;
+  --focus: #303030;
+  --error: #ad2333;
+  --shadow: 0 2px 12px rgb(0 0 0 / 0%);
+  --radius: 7px;
+  --header-surface: #ffffff;
+  --table-head-surface: #f1f1f1;
+  --table-head-text: #525252;
+  --table-stripe: #f5f5f5;
+  --table-row-hover: #eeeeee;
+  --control-surface: #ffffff;
+  --secondary-surface: #f4f4f4;
+  --tag-surface: #eeeeee;
+  --tag-text: #505050;
+  --primary-surface: #303030;
+  --primary-text: #ffffff;
+  --primary-border: #303030;
+  --error-text: #ffffff;
 }
 
-/* ---- 主题色：src/styles/themes.css（cola-black-red），跟系统深色模式 ---- */
+/*
+ * ---- 深色：站点的 minimal 没有深色，这里按同一结构推一套中性深色 ----
+ * 1. 各层表面、文字、边框：取站点深色主题 cola-black-red 同名变量的相对亮度（WCAG 公式），换成同亮度的纯灰
+ *    （色相去掉、明暗层次和对比度不变），例如 surface #1d181b → #191919、text-muted #aab4c3 → #b3b3b3。
+ * 2. 强调色：minimal 的 accent / link / focus / primary 都是接近正文的深灰 #303030；深色里镜像成接近正文的浅灰
+ *    #e0e0e0，其上的字用 #161616（13.7:1）。按钮、开关、筛选、翻页因此都是中性的黑白，不是红色。
+ * 3. 状态色（成功 / 警告 / 错误）：minimal 保留了有色相的状态色，这里同样保留，取 cola-black-red 的深色版本
+ *    （在 #191919 上 8.8–10.6:1）。圆角与无阴影跟 minimal 一致。
+ */
 @media (prefers-color-scheme: dark) {
   :root {
     color-scheme: dark;
-    --background: #110e10;
-    --surface: #1d181b;
-    --surface-muted: #202227;
-    --text: #f0f2f6;
-    --text-muted: #aab4c3;
-    --link: #ff717c;
-    --border: #36404f;
-    --line: #2b2e34;
-    --control-border: #8a8e97;
+    --background: #0f0f0f;
+    --surface: #191919;
+    --surface-muted: #222222;
+    --text: #f2f2f2;
+    --text-muted: #b3b3b3;
+    --link: #e0e0e0;
+    --border: #3f3f3f;
+    --line: #2e2e2e;
+    --control-border: #8e8e8e;
     --success: #93d7b0;
     --warning: #f0c17e;
     --error: #ff9ca3;
-    --accent: #ff717c;
-    --accent-text: #24080d;
-    --focus: #ff9ca5;
-    --radius: 6px;
-    --shadow: 0 2px 12px rgb(0 0 0 / 18%);
-    --header-surface: #171215;
-    --table-head-surface: #202328;
-    --table-head-text: #e1e2e5;
-    --table-stripe: #1b1e22;
-    --table-row-hover: #22252a;
-    --control-surface: #111316;
-    --secondary-surface: #24272d;
-    --tag-surface: #292c32;
-    --tag-text: #e1e2e5;
-    --primary-surface: #ce2335;
-    --primary-text: #ffffff;
-    --primary-border: #e34858;
-    --error-text: #2a0a0e;
+    --accent: #e0e0e0;
+    --accent-text: #161616;
+    --focus: #e0e0e0;
+    --shadow: 0 2px 12px rgb(0 0 0 / 0%);
+    --header-surface: #131313;
+    --table-head-surface: #232323;
+    --table-head-text: #e2e2e2;
+    --table-stripe: #1e1e1e;
+    --table-row-hover: #252525;
+    --control-surface: #131313;
+    --secondary-surface: #272727;
+    --tag-surface: #2c2c2c;
+    --tag-text: #e2e2e2;
+    --primary-surface: #e0e0e0;
+    --primary-text: #161616;
+    --primary-border: #e0e0e0;
+    --error-text: #1a1a1a;
   }
 }
 

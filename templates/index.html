@@ -66,8 +66,13 @@
   .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-16) var(--space-16); }
   @media (max-width: 720px) { .form-grid { grid-template-columns: 1fr; } }
   .pair { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-12); }
-  .switches { display: grid; gap: var(--space-12); margin-top: var(--space-16); }
-  .switches .field-hint { margin-inline-start: calc(36px + var(--space-8)); }
+  .switches { display: grid; justify-items: start; gap: var(--space-12); margin-top: var(--space-16); }
+  .switch-line { display: flex; align-items: center; gap: var(--space-8); }
+  .field-label { display: inline-flex; align-items: center; gap: .4rem; min-width: 0; }
+  .field-label > label { font-size: var(--text-sm); font-weight: var(--weight-semibold); }
+  .dls-head { margin: var(--space-24) 0 var(--space-12); }
+  .dls-head h3, .account-head h2 { margin: 0; }
+  .account-head { margin-bottom: var(--space-12); }
   h3 { margin: var(--space-24) 0 var(--space-12); font-size: var(--text-base); }
   .dl-row { display: grid; gap: var(--space-8); padding: var(--space-12); margin-bottom: var(--space-12); border: 1px solid var(--line); border-radius: var(--radius); }
   .dl-fields { display: grid; grid-template-columns: 1fr 1.1fr 2fr 1.2fr 1.2fr; gap: var(--space-8); align-items: end; }
@@ -126,7 +131,6 @@
     <button type="button" class="ui-card stat" id="s-problem-card">
       <span class="stat-label">异常</span>
       <span class="stat-value" id="s-problem">-</span>
-      <span class="stat-sub" id="s-problem-sub"></span>
     </button>
     <div class="ui-card stat stat-dl">
       <span class="stat-label">下载器
@@ -171,47 +175,54 @@
         <span class="hint-tip tip-anchor"><button type="button" class="hint-tip-trigger" aria-label="实例 ID" aria-describedby="instance-hint"><span aria-hidden="true">i</span></button><span id="instance-hint" role="tooltip" class="tip-bubble">实例 ID：<span class="mono" id="instance_id"></span><br>这个服务向站点上报时用它标识自己；换数据目录会生成新的。</span></span>
       </div>
     </div>
+    <!-- 说明文字一律收进标签旁的 ⓘ（components/HintTip.vue 的字段写法：? 在 <label> 外，输入框 aria-describedby 指向气泡）。
+         data-hint 由下面的 hintTips() 展开成 HintTip 的结构。 -->
     <form id="cfg" autocomplete="off" novalidate>
       <div class="form-grid">
         <div class="field">
-          <label for="site_url">站点地址</label>
+          <span class="field-label"><label for="site_url">站点地址</label><span data-hint="site_url_hint" data-hint-label="站点地址说明">一般不用改。改了地址要同时重新填 API Key。</span></span>
           <input id="site_url" name="site_url" type="url" aria-describedby="site_url_hint">
-          <p class="field-hint" id="site_url_hint">一般不用改。改了地址要同时重新填 API Key。</p>
         </div>
         <div class="field">
-          <label for="api_key">可乐PT API Key</label>
+          <span class="field-label"><label for="api_key">可乐PT API Key</label><span data-hint="api_key_hint" data-hint-label="API Key 说明">在站点「账号 → Key → API Key」新建，只勾「保种组（seedgroup）」范围。留空 = 不改。</span></span>
           <input id="api_key" name="api_key" type="password" placeholder="留空 = 不改" aria-describedby="api_key_hint">
-          <p class="field-hint" id="api_key_hint">在站点「账号 → Key → API Key」新建，只勾「保种组（seedgroup）」范围。</p>
         </div>
         <div class="field">
-          <label for="save_path">专用保存目录（下载器视角）</label>
-          <input id="save_path" name="save_path">
+          <span class="field-label"><label for="save_path">专用保存目录</label><span data-hint="save_path_hint" data-hint-label="专用保存目录说明">写下载器视角的路径（下载器里看到的路径，不是这个容器里的）。本服务只管这个目录下、带专用标签的种子。</span></span>
+          <input id="save_path" name="save_path" aria-describedby="save_path_hint">
         </div>
         <div class="field">
-          <label for="tag">专用标签</label>
-          <input id="tag" name="tag">
+          <span class="field-label"><label for="tag">专用标签</label><span data-hint="tag_hint" data-hint-label="专用标签说明">本服务加的种子都打上这个标签。去掉标签就等于交还给你，本服务不再删它。</span></span>
+          <input id="tag" name="tag" aria-describedby="tag_hint">
         </div>
         <div class="field">
-          <label for="interval">同步间隔（分钟，≥ 10）</label>
-          <input id="interval" name="interval" type="number" min="10" max="1440" inputmode="numeric">
+          <span class="field-label"><label for="interval">同步间隔（分钟）</label><span data-hint="interval_hint" data-hint-label="同步间隔说明">最少 10 分钟、最多 1440 分钟。站点每 10 分钟派一次单。</span></span>
+          <input id="interval" name="interval" type="number" min="10" max="1440" inputmode="numeric" aria-describedby="interval_hint">
         </div>
         <div class="pair">
-          <div class="field"><label for="max_adds">每轮最多加种（≤ 50）</label><input id="max_adds" name="max_adds" type="number" min="0" max="50" inputmode="numeric"></div>
-          <div class="field"><label for="max_deletes">每轮最多删种（≤ 20）</label><input id="max_deletes" name="max_deletes" type="number" min="0" max="20" inputmode="numeric"></div>
+          <div class="field">
+            <span class="field-label"><label for="max_adds">每轮最多加种</label><span data-hint="max_adds_hint" data-hint-label="加种上限说明">最多 50。加种失败按 1 小时 / 4 小时 / 1 天退避。</span></span>
+            <input id="max_adds" name="max_adds" type="number" min="0" max="50" inputmode="numeric" aria-describedby="max_adds_hint">
+          </div>
+          <div class="field">
+            <span class="field-label"><label for="max_deletes">每轮最多删种</label><span data-hint="max_deletes_hint" data-hint-label="删种上限说明">最多 20。只删本服务管理的种子。</span></span>
+            <input id="max_deletes" name="max_deletes" type="number" min="0" max="20" inputmode="numeric" aria-describedby="max_deletes_hint">
+          </div>
         </div>
       </div>
       <!-- 开关：input.switch（src/styles/main.css），写法同 features/account/ApiKeysPanel.vue 的范围开关 -->
       <div class="switches">
-        <label class="switch-row scope-switch"><input id="enabled" name="enabled" type="checkbox" role="switch" class="switch" aria-describedby="enabled_hint">启用</label>
-        <p class="field-hint" id="enabled_hint">关掉后不再定时同步，也不加种、不删种。</p>
-        <label class="switch-row scope-switch"><input id="delete_files" name="delete_files" type="checkbox" role="switch" class="switch" aria-describedby="delete_files_hint">收回时连文件一起删</label>
-        <p class="field-hint" id="delete_files_hint">站点收回派单时删种子也删文件；内容被别的种子共用时只删种子。</p>
+        <span class="switch-line"><label class="switch-row scope-switch"><input id="enabled" name="enabled" type="checkbox" role="switch" class="switch" aria-describedby="enabled_hint">启用</label><span data-hint="enabled_hint" data-hint-label="启用说明">关掉后不再定时同步，也不加种、不删种。</span></span>
+        <span class="switch-line"><label class="switch-row scope-switch"><input id="delete_files" name="delete_files" type="checkbox" role="switch" class="switch" aria-describedby="delete_files_hint">收回时连文件一起删</label><span data-hint="delete_files_hint" data-hint-label="收回时连文件一起删说明">站点收回派单时删种子也删文件；内容被别的种子共用时只删种子。</span></span>
+        <span class="switch-line"><label class="switch-row scope-switch"><input id="auto_takeover" name="auto_takeover" type="checkbox" role="switch" class="switch" aria-describedby="auto_takeover_hint">自动接管</label><span data-hint="auto_takeover_hint" data-hint-label="自动接管说明">开启后，下载器里已经在做种的同一颗种子会被自动接管；站点收回这条派单时，它会被删除（共用内容时只删种子）。只接已下完且在做种的，每轮最多 10 颗，不挪文件。</span></span>
       </div>
 
-      <h3 id="dls-title">下载器</h3>
+      <div class="hint-heading dls-head">
+        <h3 id="dls-title">下载器</h3>
+        <span data-hint="dls_hint" data-hint-label="下载器说明"><span class="tip-p">地址写容器能访问到的地址，例如 <code>http://192.168.1.10:8080</code>；Transmission 默认路径 <code>/transmission/rpc</code>。</span><span class="tip-p">密码留空 = 沿用已保存的（改了地址或用户名就要重填）。</span><span class="tip-p">多台时新种加到本服务管理最少的那台。</span></span>
+      </div>
       <div id="dls" role="group" aria-labelledby="dls-title"></div>
       <button type="button" class="secondary btn-sm" id="add-dl">添加下载器</button>
-      <p class="field-hint" style="margin-top:var(--space-8)">地址写容器能访问到的地址，例如 <code>http://192.168.1.10:8080</code>；Transmission 默认路径 <code>/transmission/rpc</code>。密码留空 = 沿用已保存的（改了地址或用户名就要重填）。多台时新种加到本服务管理最少的那台。</p>
 
       <div class="form-actions">
         <button type="submit" id="cfg-save">保存</button>
@@ -221,13 +232,15 @@
   </section>
 
   <section class="panel" aria-labelledby="account-title">
-    <h2 id="account-title">账号</h2>
+    <div class="hint-heading account-head">
+      <h2 id="account-title">账号</h2>
+      <span data-hint="account_hint" data-hint-label="账号说明"><span class="tip-p">改密码后，其它浏览器的登录会全部退出。</span><span class="tip-p">忘了密码：删掉数据目录里的 <code>auth.json</code> 并重启容器，日志里会显示新的初始密码。</span></span>
+    </div>
     <div class="account-row">
       <p>面板登录密码</p>
-      <button type="button" class="secondary btn-sm" id="pw-open">修改登录密码</button>
+      <button type="button" class="secondary btn-sm" id="pw-open" aria-describedby="account_hint">修改登录密码</button>
       <p class="field-hint" id="pw-env" hidden>密码由环境变量 COLASEEDGROUP_PASSWORD 设定，面板里不能改；要改就改环境变量并重建容器。</p>
     </div>
-    <p class="field-hint" style="margin-top:var(--space-8)">忘了密码：删掉数据目录里的 <code>auth.json</code> 并重启容器，日志里会显示新的初始密码。</p>
     <p id="pw-result" class="action-feedback action-feedback--success" role="status"></p>
   </section>
 </main>
@@ -299,6 +312,23 @@
 "use strict";
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+// HintTip（components/HintTip.vue）：<span data-hint="id" data-hint-label="名称">说明</span> 展开成
+// 「ⓘ 按钮 + 气泡」，气泡留在 DOM 里，aria-describedby 始终指得到；交互在下面 useTip 的移植里
+function hintTips() {
+  for (const el of document.querySelectorAll("[data-hint]")) {
+    const wrap = document.createElement("span");
+    wrap.className = "hint-tip tip-anchor";
+    wrap.innerHTML = `<button type="button" class="hint-tip-trigger" aria-label="${esc(el.dataset.hintLabel || "说明")}" aria-describedby="${esc(el.dataset.hint)}"><span aria-hidden="true">i</span></button>`;
+    const bubble = document.createElement("span");
+    bubble.id = el.dataset.hint;
+    bubble.setAttribute("role", "tooltip");
+    bubble.className = "tip-bubble";
+    bubble.append(...el.childNodes);
+    wrap.append(bubble);
+    el.replaceWith(wrap);
+  }
+}
+hintTips();
 const fullTime = (t) => t ? new Date(t * 1000).toLocaleString("zh-CN", {hour12: false}) : "-";
 const hhmm = (t) => new Date(t * 1000).toLocaleTimeString("zh-CN", {hour: "2-digit", minute: "2-digit", hour12: false});
 const TRIGGER = {startup: "启动后同步", schedule: "定时同步", manual: "手动同步"};
@@ -489,7 +519,7 @@ function renderStats(s) {
   setText($("s-owned"), `${s.owned_count} 个`);
   setText($("s-owned-sub"), s.owned_total_text);
   setText($("s-problem"), has ? String(st.problem) : "-");
-  setText($("s-problem-sub"), !has ? "" : (st.problem ? "点此只看异常" : "没有要你处理的"));
+  // 说明不占位置：「点此只看异常」只在无障碍名称里
   $("s-problem-card").classList.toggle("has-problem", has && st.problem > 0);
   $("s-problem-card").setAttribute("aria-label", has ? `异常 ${st.problem} 条，只看异常` : "异常");
 
@@ -607,25 +637,33 @@ async function act(body) {
   setTimeout(refresh, 800);
 }
 
-let pendingTakeover = null;
-dialogs.setup($("confirm"), () => { pendingTakeover = null; dialogs.close($("confirm")); });
-$("confirm-form").addEventListener("submit", (ev) => {
-  ev.preventDefault();
-  const tid = pendingTakeover;
-  pendingTakeover = null;
+// 确认对话框（ConfirmDialog.vue）：接管一颗种子、打开「自动接管」都用它；确认 → true，取消 / Esc → false
+let confirmResolve = null;
+function finishConfirm(ok) {
+  const done = confirmResolve;
+  confirmResolve = null;
   dialogs.close($("confirm"));
-  if (tid !== null) act({action: "takeover", torrent_id: tid, confirm: true});
-});
+  if (done) done(ok);
+}
+function askConfirm({title, name = "", text, ok}) {
+  $("confirm-title").textContent = title;
+  $("confirm-name").textContent = name;
+  $("confirm-name").hidden = !name;
+  $("confirm-text").textContent = text;
+  $("confirm-ok").textContent = ok;
+  dialogs.open($("confirm"));
+  return new Promise((resolve) => { confirmResolve = resolve; });
+}
+dialogs.setup($("confirm"), () => finishConfirm(false));
+$("confirm-form").addEventListener("submit", (ev) => { ev.preventDefault(); finishConfirm(true); });
 $("assignments").addEventListener("click", (ev) => {
   const b = ev.target.closest("button[data-act]");
   if (!b) return;
   const tid = Number(b.dataset.tid);
   if (b.dataset.act !== "takeover") { act({action: b.dataset.act, torrent_id: tid}); return; }
   const row = (view.rows || []).find((r) => r.torrent_id === tid && r.ops.some((o) => o.action === "takeover"));
-  $("confirm-name").textContent = row ? row.name : "#" + tid;
-  $("confirm-text").textContent = view.warning;
-  pendingTakeover = tid;
-  dialogs.open($("confirm"));
+  askConfirm({title: "接管这颗种子？", name: row ? row.name : "#" + tid, text: view.warning, ok: "确认接管"})
+    .then((yes) => { if (yes) act({action: "takeover", torrent_id: tid, confirm: true}); });
 });
 $("retry-all").onclick = () => act({action: "retry"});
 
@@ -690,6 +728,7 @@ function fillConfig(c) {
   for (const k of ["site_url", "save_path", "tag", "interval", "max_adds", "max_deletes"]) $(k).value = c[k];
   $("enabled").checked = !!c.enabled;
   $("delete_files").checked = !!c.delete_files;
+  $("auto_takeover").checked = !!c.auto_takeover;
   $("api_key").value = "";
   $("api_key").placeholder = c.api_key_set ? "已保存（留空 = 不改）" : "还没填";
   $("instance_id").textContent = c.instance_id;
@@ -706,7 +745,7 @@ async function save(ev) {
   const body = {
     site_url: $("site_url").value, save_path: $("save_path").value, tag: $("tag").value,
     interval: +$("interval").value, max_adds: +$("max_adds").value, max_deletes: +$("max_deletes").value,
-    enabled: $("enabled").checked, delete_files: $("delete_files").checked,
+    enabled: $("enabled").checked, delete_files: $("delete_files").checked, auto_takeover: $("auto_takeover").checked,
     downloaders: [...$("dls").children].map(rowValues).filter((d) => d.name || d.url),
   };
   if ($("api_key").value.trim()) body.api_key = $("api_key").value.trim();
@@ -725,6 +764,14 @@ async function save(ev) {
   }
 }
 $("cfg").addEventListener("submit", save);
+// 打开「自动接管」先确认一次（同接管的确认框）；取消就关回去
+$("auto_takeover").addEventListener("change", async (ev) => {
+  const sw = ev.currentTarget;
+  if (!sw.checked) return;
+  const yes = await askConfirm({title: "打开自动接管？", ok: "打开自动接管",
+    text: "开启后，下载器里已经在做种的同一颗种子会被自动接管；站点收回这条派单时，它会被删除（共用内容时只删种子）。保存设置后生效。"});
+  if (!yes) sw.checked = false;
+});
 $("add-dl").onclick = () => dlRow().querySelector("input").focus();
 
 // ---------------- 账号：修改登录密码（对话框） ----------------

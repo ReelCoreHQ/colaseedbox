@@ -303,6 +303,26 @@ class Box(unittest.TestCase):
         # 开关全用 input.switch：页面上没有别的复选框
         self.assertEqual(html.count('type="checkbox"'), html.count('type="checkbox" role="switch" class="switch"'))
 
+    # ---------------- 自动接管（执行器同一份规则，这里测外壳把开关传进去） ----------------
+    def test_auto_takeover_follows_setting(self):
+        _, theirs = make_torrent("Theirs.Film")
+        self.qb.qbc.rows.append({"hash": theirs, "name": "Theirs.Film", "save_path": "/media", "tags": "",
+                                 "content_path": "/media/Theirs.Film", "progress": 1, "state": "stalledUP"})
+        self.session({"/assignment": Rsp(200, assignment([item(theirs, 2, "keep")])), "/state": Rsp(200, {"ok": True})})
+        self.assertFalse(self.store.load()["auto_takeover"])             # 默认关
+        self.assertEqual(self.runner.run_cycle()["taken_over"], [])
+        self.assertEqual(self.qb.qbc.calls, [])
+        self.store.save(base_config(auto_takeover=True))
+        report = self.runner.run_cycle()
+        self.assertEqual(report["taken_over"], [theirs])
+        self.assertIn(("tag", theirs, (TAG,)), self.qb.qbc.calls)
+        self.assertTrue(self.store.load_state()["owned"][theirs]["taken_over"])
+        st = self.status()
+        self.assertEqual(st["last"]["taken_over"], 1)
+        self.assertEqual([r["local_text"] for r in st["assignments"]], ["本轮自动接管"])
+        self.assertIn("自动接管 Theirs.Film", LOG.text())
+        self.assertNotIn(theirs, json.dumps(st, ensure_ascii=False))
+
     # ---------------- 下载器剩余空间（每轮读一次，记进 last_run） ----------------
     def run_empty(self):
         self.session({"/assignment": Rsp(200, assignment([item(make_torrent("Big")[1], 9, "add", size=5 * 1024 ** 4,
@@ -355,6 +375,12 @@ class HumanSize(unittest.TestCase):
 
 
 class ConfigTests(unittest.TestCase):
+    def test_auto_takeover_saved_and_merged(self):
+        cfg, _ = merge_update(normalize(base_config()), {"auto_takeover": True})
+        self.assertTrue(cfg["auto_takeover"])
+        self.assertFalse(normalize(base_config())["auto_takeover"])
+        self.assertTrue(public_view(cfg)["auto_takeover"])
+
     def test_limits_clamped(self):
         cfg = normalize({"max_deletes": 500, "max_adds": -3, "interval": 1})
         self.assertEqual((cfg["max_deletes"], cfg["max_adds"], cfg["interval"]), (20, 0, 10))

@@ -1,6 +1,6 @@
 """可乐保种组 Docker 版（colaseedgroup-docker）：不需要 MoviePilot 的独立服务。
 
-执行器逻辑与 MoviePilot 插件 0.7.0 是同一份（app/seedgroup/，逐字节搬来）；
+执行器逻辑与 MoviePilot 插件是同一份（版本见 app/seedgroup/VENDOR.json）（app/seedgroup/，逐字节搬来）；
 这里是外壳：配置、定时运行、端口 3006 上的小面板（要登录，见 auth.py）。
 """
 
