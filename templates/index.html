@@ -53,7 +53,16 @@
   .bar-legend i { width: 10px; height: 10px; border-radius: 2px; background: var(--seg); }
   .bar-clear { margin-inline-start: auto; }
   .asg { margin-top: var(--space-24); }
-  .asg-title { display: flex; align-items: baseline; flex-wrap: wrap; gap: var(--space-8); margin: 0 0 var(--space-8); font-size: var(--text-base); }
+  /* 两层：第一层是区块标题（名字 + 条数小标，不写体积）；第二层是区块里的行（缩进、左边状态图标、小一号、不加粗），
+     条数 · 体积与操作只在第二层 */
+  .asg-title { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-8); margin: 0 0 var(--space-8); font-size: var(--text-base); font-weight: var(--weight-semibold); }
+  .sec-count { min-width: 22px; height: 20px; font-size: var(--text-xs); }
+  .row-list, .cause-list, .lvl2-line { padding-inline-start: var(--space-16) !important; }
+  .asg-row, .cause, .lvl2-line { font-size: var(--text-sm); font-weight: var(--weight-regular); }
+  .lvl2-icon { display: inline-flex; flex: none; width: 16px; margin-inline-end: var(--space-8); color: var(--text-muted); vertical-align: -3px; }
+  .lvl2-icon.is-warn { color: var(--error); }
+  .lvl2-line { margin: 0 0 var(--space-8); color: var(--text-muted); }
+  .cause .row-list .lvl2-icon { display: none; }
   .asg-meta { color: var(--text-muted); font-size: var(--text-sm); font-weight: var(--weight-regular); }
   .asg-toggle { gap: var(--space-8); min-height: var(--control-sm); padding: 0; border: 0; background: none; color: var(--text); font: inherit; font-weight: var(--weight-semibold); }
   .asg-toggle:hover { text-decoration: none; }
@@ -75,17 +84,21 @@
   .cause { padding: var(--space-8) 0; border-bottom: 1px solid var(--line); }
   .cause:last-child { border-bottom: 0; }
   .cause-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-6) var(--space-12); }
-  .cause-label { font-weight: var(--weight-semibold); }
+  .cause-label { display: inline-flex; align-items: center; gap: var(--space-6); }
+  .exp-btn { width: var(--control-sm); min-height: var(--control-sm); padding: 0; border: 0; background: none; color: var(--text-muted); }
+  .exp-btn:hover { text-decoration: none; color: var(--text); }
+  .exp-btn .ui-icon { transition: rotate var(--duration-fast) var(--ease-out); }
+  .exp-btn[aria-expanded="true"] .ui-icon { rotate: 90deg; }
   .cause-meta { color: var(--text-muted); font-size: var(--text-sm); font-variant-numeric: tabular-nums; }
   .cause-tools { display: flex; gap: var(--space-8); margin-inline-start: auto; }
-  .cause .row-list { margin: var(--space-8) 0 0 var(--space-12); padding-inline-start: var(--space-12); border-inline-start: 2px solid var(--line); }
+  .cause .row-list { margin: var(--space-8) 0 0 var(--space-24); padding-inline-start: var(--space-12) !important; border-inline-start: 2px solid var(--line); }
   .seeding-search { max-width: 22rem; margin-bottom: var(--space-8); }
   .seeding-search input { width: 100%; }
   .empty-line { margin: 0; padding: var(--space-12) 0; color: var(--text-muted); }
   /* 手机：区块自然往下排，每条派单一张卡片——第一行名字与体积，第二行情况，第三行下载器与操作 */
   @media (max-width: 640px) {
     .asg-row { display: flex; flex-wrap: wrap; align-items: center; padding: var(--space-12) var(--space-4); }
-    .asg-name { flex: 1 1 calc(100% - 7em); font-weight: var(--weight-semibold); }   /* 名字与体积占满第一行，下载器总在下一行 */
+    .asg-name { flex: 1 1 calc(100% - 7em); }   /* 名字与体积占满第一行，下载器总在下一行 */
     .asg-size { flex: none; color: var(--text-muted); }
     .asg-detail { flex: 1 1 100%; }
     .asg-detail:empty { display: none; }
@@ -197,17 +210,18 @@
     <p id="assign-empty" class="empty-line" hidden></p>
 
     <section class="asg" id="sec-problem" aria-labelledby="sec-problem-title" hidden>
-      <h3 class="asg-title" id="sec-problem-title">需要处理 <span class="asg-meta"></span></h3>
+      <h3 class="asg-title" id="sec-problem-title">需要处理 <span class="count-pill sec-count"></span></h3>
       <ul class="cause-list" id="causes"></ul>
     </section>
     <section class="asg" id="sec-active" aria-labelledby="sec-active-title" hidden>
-      <h3 class="asg-title" id="sec-active-title">进行中 <span class="asg-meta"></span></h3>
+      <h3 class="asg-title" id="sec-active-title">进行中 <span class="count-pill sec-count"></span></h3>
       <ul class="row-list" id="active-rows"></ul>
       <ul class="cause-list" id="pending-lines"></ul>
     </section>
     <section class="asg" id="sec-seeding" aria-labelledby="seeding-toggle" hidden>
-      <h3 class="asg-title"><button type="button" class="asg-toggle" id="seeding-toggle" aria-expanded="false" aria-controls="seeding-body"><svg class="ui-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="m6 3 5 5-5 5" /></svg>做种中 <span class="asg-meta"></span></button></h3>
+      <h3 class="asg-title"><button type="button" class="asg-toggle" id="seeding-toggle" aria-expanded="false" aria-controls="seeding-body"><svg class="ui-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="m6 3 5 5-5 5" /></svg>做种中 <span class="count-pill sec-count"></span></button></h3>
       <div id="seeding-body" hidden>
+        <p class="lvl2-line"><span class="lvl2-icon" aria-hidden="true"><svg class="ui-icon" viewBox="0 0 16 16"><path d="M8 13.5v-8M4.5 9 8 5.5 11.5 9M3 2.5h10" /></svg></span><span id="seeding-total"></span></p>
         <div class="seeding-search"><label for="seeding-q" class="sr-only">按名字搜索做种中的种子</label><input id="seeding-q" type="search" placeholder="按名字搜索" autocomplete="off"></div>
         <ul class="row-list" id="seeding-rows"></ul>
         <!-- 翻页：components/AppPager.vue -->
@@ -215,7 +229,7 @@
       </div>
     </section>
     <section class="asg" id="sec-removing" aria-labelledby="sec-removing-title" hidden>
-      <h3 class="asg-title" id="sec-removing-title">即将删除 <span class="asg-meta"></span></h3>
+      <h3 class="asg-title" id="sec-removing-title">即将删除 <span class="count-pill sec-count"></span></h3>
       <ul class="row-list" id="removing-rows"></ul>
     </section>
     <p id="assign-truncated" class="empty-line" hidden></p>
@@ -640,7 +654,15 @@ function siteText(v) {
   if (v.site.confirmed) return `<span class="seen-ok">站点已确认 ✓</span>${ago ? " " + esc(ago) : ""}`;
   return "等待取样 ⏳" + (ago ? `（上次确认 ${esc(ago)}）` : "");
 }
-function rowHTML(v, detail) {
+const ICONS = {
+  warn: '<path d="M8 2.5 1.5 13.5h13z" /><path d="M8 6.5v3M8 11.5v.01" />',
+  down: '<path d="M8 2.5v8M4.5 7 8 10.5 11.5 7M3 13.5h10" />',
+  wait: '<circle cx="8" cy="8" r="5.5" /><path d="M8 5v3l2 1.5" />',
+  seed: '<path d="M8 13.5v-8M4.5 9 8 5.5 11.5 9M3 2.5h10" />',
+  drop: '<path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.5 9h6l.5-9" />',
+};
+const icon = (name) => `<span class="lvl2-icon${name === "warn" ? " is-warn" : ""}" aria-hidden="true"><svg class="ui-icon" viewBox="0 0 16 16">${ICONS[name]}</svg></span>`;
+function rowHTML(v, detail, kind) {
   view.byId.set(v.torrent_id, v);
   const badge = v.badge ? `<span class="status-badge">${esc(v.badge)}</span>` : "";
   const note = v.note ? `<span class="asg-note">${esc(v.note)}</span>` : "";
@@ -648,7 +670,7 @@ function rowHTML(v, detail) {
       data-fk="act:${v.torrent_id}" aria-label="${esc(v.primary.text)}：${esc(v.name)}">${esc(v.primary.text)}</button>` : "";
   const more = v.more.length ? `<button type="button" class="more-trigger" data-more="${v.torrent_id}" popovertarget="row-menu"
       aria-haspopup="menu" data-fk="more:${v.torrent_id}" aria-label="更多操作：${esc(v.name)}"><svg class="ui-icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="3.5" cy="8" r="1.3" /><circle cx="8" cy="8" r="1.3" /><circle cx="12.5" cy="8" r="1.3" /></svg></button>` : "";
-  return `<li class="asg-row"><span class="asg-name">${esc(v.name)}${badge}${note}</span><span class="asg-size">${esc(v.size_text)}</span>`
+  return `<li class="asg-row"><span class="asg-name">${kind ? icon(kind) : ""}${esc(v.name)}${badge}${note}</span><span class="asg-size">${esc(v.size_text)}</span>`
     + `<span class="asg-detail">${detail}</span><span class="asg-dl">${esc(v.downloader || "")}</span><span class="asg-ops">${primary}${more}</span></li>`;
 }
 function progressHTML(v) {
@@ -656,17 +678,24 @@ function progressHTML(v) {
   return `<span class="prog" role="progressbar" aria-label="下载进度：${esc(v.name)}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}"><span style="width:${pct}%"></span></span>`
     + [pct + "%", v.speed_text, v.eta_text].filter(Boolean).map(esc).join(" · ");
 }
-function groupHTML(g, kind, label, detail) {
-  // 一行原因（或一类待加种）：说法 · 条数 · 体积 · 批量修复 · 展开成员
-  const key = `${kind}:${g.key}`, open = view.open.has(key), id = "grp-" + domId(key);
+function groupHTML(g, kind, label, detail, code) {
+  // 第二层的一行原因（或一类待加种）：图标 · 说法（原因码在旁边的 ⓘ 里）· 条数 · 体积 · 批量修复 · ▸ 展开成员
+  const key = `${kind}:${g.key}`, open = view.open.has(key), id = "grp-" + domId(key), tipId = "code-" + domId(key);
+  // 原因码只在 ⓘ 提示里（components/HintTip.vue），不当正文
+  const codeTip = code ? `<span class="hint-tip tip-anchor"><button type="button" class="hint-tip-trigger" aria-label="原因码" aria-describedby="${tipId}"
+      data-fk="code:${esc(key)}"><span aria-hidden="true">i</span></button><span id="${tipId}" role="tooltip" class="tip-bubble">原因码：${esc(code)}</span></span>` : "";
   const fix = g.fix ? `<button type="button" class="btn-sm" data-bulk="${esc(g.fix.action)}" data-ids="${g.rows.map((v) => v.torrent_id).join(",")}"
       data-fk="fix:${esc(key)}">${esc(g.fix.text)}</button>` : "";
-  return `<li class="cause"><div class="cause-head"><span class="cause-label">${label}</span><span class="cause-meta">${g.count} 个 · ${esc(g.size_text)}</span>`
-    + `<span class="cause-tools">${fix}<button type="button" class="text-btn" data-expand="${esc(key)}" aria-expanded="${open}" aria-controls="${id}"
-      data-fk="exp:${esc(key)}">${open ? "收起" : "展开"}</button></span></div>`
+  return `<li class="cause"><div class="cause-head"><span class="cause-label">${icon(kind === "cause" ? "warn" : "wait")}${label}${codeTip}</span>`
+    + `<span class="cause-meta">${esc(g.meta_text)}</span>`
+    + `<span class="cause-tools">${fix}<button type="button" class="exp-btn" data-expand="${esc(key)}" aria-expanded="${open}" aria-controls="${id}"
+      data-fk="exp:${esc(key)}" aria-label="${open ? "收起" : "展开"}成员：${esc(g.label)}"><svg class="ui-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="m6 3 5 5-5 5" /></svg></button></span></div>`
     + `<ul class="row-list" id="${id}"${open ? "" : " hidden"}>${open ? g.rows.map((v) => rowHTML(v, detail(v))).join("") : ""}</ul></li>`;
 }
-function setMeta(sec, s) { setText(sec.querySelector(".asg-meta"), `${s.count} 个 · ${s.size_text}`); }
+function setMeta(sec, s) {
+  // 第一层：区块标题只有条数小标；读屏读「N 个」
+  setList(sec.querySelector(".sec-count"), `<span aria-hidden="true">${s.count}</span><span class="sr-only">${s.count} 个</span>`);
+}
 
 function renderAssignments(s) {
   const g = s.groups;
@@ -689,14 +718,13 @@ function renderAssignments(s) {
   $("sec-problem").hidden = !shows("problem");
   if (secs.problem) {
     setMeta($("sec-problem"), secs.problem);
-    setList($("causes"), secs.problem.causes.map((c) => groupHTML(c, "cause", inlineTip(c.label, "原因码 " + (c.code || "—")),
-      (v) => esc(v.status_text))).join(""));
+    setList($("causes"), secs.problem.causes.map((c) => groupHTML(c, "cause", esc(c.label), (v) => esc(v.status_text), c.code)).join(""));
   }
   // 进行中：下载中的行 + 待加种（按原因各一行）
   $("sec-active").hidden = !shows("active");
   if (secs.active) {
     setMeta($("sec-active"), secs.active);
-    setList($("active-rows"), view.only === "pending" ? "" : secs.active.rows.map((v) => rowHTML(v, progressHTML(v))).join(""));
+    setList($("active-rows"), view.only === "pending" ? "" : secs.active.rows.map((v) => rowHTML(v, progressHTML(v), "down")).join(""));
     setList($("pending-lines"), view.only === "downloading" ? "" : secs.active.pending.map((p) =>
       groupHTML(p, "pending", `待加种 · ${esc(p.label)}`, () => "")).join(""));
   }
@@ -704,6 +732,7 @@ function renderAssignments(s) {
   $("sec-seeding").hidden = !shows("seeding");
   if (secs.seeding) {
     setMeta($("sec-seeding"), secs.seeding);
+    setText($("seeding-total"), `合计 ${secs.seeding.size_text}`);
     const open = view.seedingOpen || view.only === "seeding";
     $("seeding-toggle").setAttribute("aria-expanded", String(open));
     $("seeding-body").hidden = !open;
@@ -712,14 +741,14 @@ function renderAssignments(s) {
     const pages = Math.max(1, Math.ceil(rows.length / PAGE));
     view.page = Math.min(Math.max(1, view.page), pages);
     setList($("seeding-rows"), !open ? "" : (rows.length ? rows.slice((view.page - 1) * PAGE, view.page * PAGE)
-      .map((v) => rowHTML(v, siteText(v))).join("") : `<li class="empty-line">没有名字里带「${esc(view.q.trim())}」的种子</li>`));
+      .map((v) => rowHTML(v, siteText(v), "seed")).join("") : `<li class="empty-line">没有名字里带「${esc(view.q.trim())}」的种子</li>`));
     renderPager(open ? pages : 1, rows.length);
   }
   // 即将删除：原因 · 接下来会怎样
   $("sec-removing").hidden = !shows("removing");
   if (secs.removing) {
     setMeta($("sec-removing"), secs.removing);
-    setList($("removing-rows"), secs.removing.rows.map((v) => rowHTML(v, `${esc(v.release_text)} · ${esc(v.outcome_text)}`)).join(""));
+    setList($("removing-rows"), secs.removing.rows.map((v) => rowHTML(v, `${esc(v.release_text)} · ${esc(v.outcome_text)}`, "drop")).join(""));
   }
   $("assign-truncated").hidden = !s.assignments_truncated;
   setText($("assign-truncated"), s.assignments_truncated ? `还有 ${s.assignments_truncated} 条未列出` : "");

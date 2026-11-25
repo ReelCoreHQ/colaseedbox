@@ -1,10 +1,10 @@
 {
   "source": "ReelCoreHQ/moviepilot-plugin-colaseedgroup",
   "path": "plugins.v3/colaseedgroup",
-  "commit": "70e5b8975069c2d1903e5cbf66152d60ff75df87",
+  "commit": "8053beb8a827e4ae0d738188e2ae488101eac0cd",
   "plugin_version": "0.7.2",
   "files": {
-    "engine.py": "0432962971675a5f91b6ae5a4b0a4608778a1e6cb590a7d68b069ae66f994228",
+    "engine.py": "7d937b9cb512e196468ca794a809962aa0e4d93db5f67e0e8827809c831d4a5c",
     "site.py": "95f0e33981b82f8c337cce19aec3342dc053ba76e3693aac57090cad9ef6020e",
     "clients.py": "f08aa691cd6d6e9f9fb262d4a0a5c50582d7e9c626ba819b4b53e94256b02757",
     "torrent.py": "e6a68566c51d8bb22ad717ec69059997dfae56ffa30fc39dfe1286122d68d849"
