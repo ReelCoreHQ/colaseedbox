@@ -5,8 +5,11 @@ import os
 import pathlib
 import tempfile
 import unittest
+from unittest import mock
 
-from support import KEY, LAN, QB_PASS, make_torrent
+import qbittorrentapi
+import transmission_rpc
+from support import KEY, LAN, LOG, QB_PASS, make_torrent
 
 from app.downloaders import TrInstance, _parse_add
 from app.seedgroup.clients import TrDownloader
@@ -74,6 +77,75 @@ class AdapterTests(unittest.TestCase):
             TrInstance.reconnect = orig
 
 
+class FreeSpaceTrc:
+    """transmission_rpc.Client.free_space 的替身：目录不存在时 Transmission 回错误。"""
+
+    def __init__(self, exists):
+        self.exists, self.asked = exists, []
+
+    def free_space(self, path):
+        self.asked.append(path)
+        if path not in self.exists:
+            raise transmission_rpc.TransmissionError(f"http://{LAN}:9091 No such file (password={QB_PASS})")
+        return 7 * 1024 ** 3
+
+
+class FreeSpaceTests(unittest.TestCase):
+    def test_tr_free_space_walks_up_to_an_existing_dir(self):
+        inst = TrInstance.__new__(TrInstance)
+        inst.name, inst.trc = "tr1", FreeSpaceTrc({"/downloads"})
+        self.assertEqual(inst.free_space("/downloads/colaseedgroup"), 7 * 1024 ** 3)
+        self.assertEqual(inst.trc.asked, ["/downloads/colaseedgroup", "/downloads"])
+        inst.trc = FreeSpaceTrc(set())
+        self.assertIsNone(inst.free_space("/a/b/c/d/e"))
+        self.assertEqual(len(inst.trc.asked), 4)   # 最多往上三层
+        inst.trc = None
+        self.assertIsNone(inst.free_space("/downloads"))
+
+    def test_qb_free_space_from_maindata(self):
+        from support import fake_qb
+        qb = fake_qb()
+        self.assertEqual(qb.free_space("/ignored"), 3 * 1024 ** 4)
+        qb.qbc.sync_maindata = lambda: {"server_state": {}}
+        self.assertIsNone(qb.free_space("/x"))
+        qb.qbc.sync_maindata = lambda: {"server_state": {"free_space_on_disk": True}}
+        self.assertIsNone(qb.free_space("/x"))
+
+
+class FakeQbClient:
+    """qbittorrentapi.Client 的替身：按地址 / 密码模拟连不上、密码不对、正常。异常文本故意带上地址和密码。"""
+
+    made = []
+
+    def __init__(self, host, username=None, password=None, **_kw):
+        self.host, self.username, self.password = host, username, password
+        FakeQbClient.made.append(self)
+
+    def auth_log_in(self):
+        if "10.9.9.9" in self.host:
+            raise qbittorrentapi.APIConnectionError(f"Failed to connect to {self.host} (password={self.password})")
+        if self.password != QB_PASS:
+            raise qbittorrentapi.LoginFailed(f"{self.username}:{self.password}@{self.host} rejected")
+
+    def torrents_info(self, torrent_hashes=None):
+        return [{"hash": "a" * 40}, {"hash": "b" * 40}]
+
+    def sync_maindata(self):
+        return {"server_state": {"free_space_on_disk": 3 * 1024 ** 4}}
+
+
+class FakeTrClient:
+    def __init__(self, *, password=None, **_kw):
+        if password != QB_PASS:
+            raise transmission_rpc.TransmissionAuthError(f"401 at http://{LAN}:9091 (password={password})")
+
+    def get_torrents(self, arguments=None):
+        return []
+
+    def free_space(self, path):
+        return None
+
+
 class ApiTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -125,11 +197,95 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(self.client.post("/api/action", content="{}", headers={"Content-Type": "text/plain"}).status_code,
                          415)
         for body in ({"action": "nuke", "torrent_id": 1}, {"action": "resume"}, {"action": "resume", "torrent_id": "1"},
-                     {"action": "takeover", "torrent_id": 1}, {"action": "takeover", "torrent_id": 1, "confirm": "yes"}):
+                     {"action": "takeover", "torrent_id": 1}, {"action": "takeover", "torrent_id": 1, "confirm": "yes"},
+                     {"action": "retry", "torrent_ids": []}, {"action": "retry", "torrent_ids": [1, "2"]},
+                     {"action": "retry", "torrent_ids": "1"}, {"action": "resume", "torrent_ids": [1], "torrent_id": 1},
+                     {"action": "takeover", "torrent_ids": [1], "confirm": True},
+                     {"action": "retry", "torrent_ids": list(range(2001))}):
             self.assertEqual(self.client.post("/api/action", json=body).status_code, 422, body)
+        r = self.client.post("/api/action", json={"action": "recheck", "torrent_ids": [1, 2]})
+        self.assertIn(r.status_code, (200, 409))
+        self.assertIn("message", r.json())
         r = self.client.post("/api/action", json={"action": "retry"})
         self.assertIn(r.status_code, (200, 409))
         self.assertIn("message", r.json())
+
+    # ---------------- 设置里的「测试连接」 ----------------
+    def save_qb(self):
+        r = self.client.post("/api/config", json={
+            "api_key": KEY, "downloaders": [{"name": "qb1", "type": "qbittorrent", "url": f"http://{LAN}:8080",
+                                             "username": "admin", "password": QB_PASS}]})
+        self.assertEqual(r.status_code, 200, r.text)
+
+    def probe(self, **row):
+        body = {"name": "qb1", "type": "qbittorrent", "url": f"http://{LAN}:8080", "username": "admin", "password": ""}
+        body.update(row)
+        with mock.patch.object(qbittorrentapi, "Client", FakeQbClient), \
+             mock.patch.object(transmission_rpc, "Client", FakeTrClient):
+            return self.client.post("/api/downloaders/test", json=body)
+
+    def assert_no_secrets(self, *responses):
+        blob = LOG.text() + "".join(r.text for r in responses)
+        for secret in (QB_PASS, LAN, "10.9.9.9", "wrong-pass", "admin"):
+            self.assertNotIn(secret, blob)
+
+    def test_test_connection_results(self):
+        self.save_qb()
+        LOG.lines.clear()
+        FakeQbClient.made.clear()
+        ok = self.probe(password=QB_PASS)
+        self.assertEqual(ok.status_code, 200, ok.text)
+        self.assertEqual(ok.json(), {"result": "ok", "torrents": 2, "free_bytes": 3 * 1024 ** 4, "free_text": "3.0 TiB"})
+        bad = self.probe(password="wrong-pass")
+        self.assertEqual(bad.json(), {"result": "auth_failed", "free_text": ""})
+        down = self.probe(url="http://10.9.9.9:8080", password=QB_PASS)
+        self.assertEqual(down.json(), {"result": "unreachable", "free_text": ""})
+        tr = self.probe(name="tr1", type="transmission", url=f"http://{LAN}:9091", password="wrong-pass")
+        self.assertEqual(tr.json()["result"], "auth_failed")
+        tr = self.probe(name="tr1", type="transmission", url=f"http://{LAN}:9091", password=QB_PASS)
+        self.assertEqual(tr.json(), {"result": "ok", "torrents": 0, "free_bytes": None, "free_text": ""})
+        self.assert_no_secrets(ok, bad, down, tr)
+        # 只读：测试连接不改配置
+        self.assertEqual(self.client.get("/api/config").json()["downloaders"][0]["url"], f"http://{LAN}:8080")
+
+    def test_test_connection_blank_password_uses_saved_only_for_same_target(self):
+        self.save_qb()
+        LOG.lines.clear()
+        FakeQbClient.made.clear()
+        same = self.probe()                                            # 密码留空 = 用已保存的
+        self.assertEqual(same.json()["result"], "ok")
+        self.assertEqual(FakeQbClient.made[-1].password, QB_PASS)
+        moved = self.probe(url="http://10.9.9.9:8080")                 # 改了地址：已保存的密码不跟过去
+        self.assertEqual(moved.json(), {"result": "password_required"})
+        renamed_user = self.probe(username="root")
+        self.assertEqual(renamed_user.json(), {"result": "password_required"})
+        self.assertEqual(len(FakeQbClient.made), 1)                    # 后两次根本没去连
+        fresh = self.probe(name="", url=f"http://{LAN}:8081")          # 新的一行、没填名字、没填密码
+        self.assertEqual(fresh.json()["result"], "auth_failed")
+        self.assertIsNone(FakeQbClient.made[-1].password)
+        self.assert_no_secrets(same, moved, renamed_user, fresh)
+
+    def test_test_connection_validates_and_requires_session(self):
+        r = self.client.post("/api/downloaders/test", content="{}", headers={"Content-Type": "text/plain"})
+        self.assertEqual(r.status_code, 415)
+        r = self.probe(type="deluge")
+        self.assertEqual((r.status_code, r.json()["error"]["field"]), (422, "downloaders.type"))
+        r = self.probe(url="http://u:p@host:8080")
+        self.assertEqual((r.status_code, r.json()["error"]["field"]), (422, "downloaders.url"))
+        from fastapi.testclient import TestClient
+
+        import app.main as main
+        anon = TestClient(main.app).post("/api/downloaders/test", json={"name": "qb1"})
+        self.assertEqual(anon.status_code, 401)
+
+    def test_panel_css_is_public(self):
+        from fastapi.testclient import TestClient
+
+        import app.main as main
+        r = TestClient(main.app).get("/panel.css")
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("--background", r.text)
+        self.assertTrue(r.headers["content-type"].startswith("text/css"))
 
     def test_index_served(self):
         r = self.client.get("/")

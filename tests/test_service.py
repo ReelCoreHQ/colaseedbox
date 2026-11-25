@@ -16,6 +16,7 @@ from app.config import ConfigError, Store, merge_update, normalize, public_view
 from app.runner import Runner
 from app.seedgroup import VENDOR, VERSION
 from app.seedgroup.clients import wrap
+from app.seedgroup.engine import human_size
 
 TAG = "可乐保种组"
 PATH = "/downloads/colaseedgroup"
@@ -191,8 +192,11 @@ class Box(unittest.TestCase):
         st = self.status()
         self.assertEqual((st["owned_count"], st["owned_total_text"]), (2, "112 MiB"))
         self.assertEqual(st["last"]["capacity_text"], "2.0 TiB")
-        self.assertEqual(st["last"]["skipped"][0]["code"], "external")
-        self.assertIsNone(st["assignments"])   # 老版本留下的 last_run 没有快照
+        self.assertIsNone(st["groups"])   # 老版本留下的 last_run 没有快照
+        # 老版本的 last_run 也没有下载器快照：配置里的下载器照样列出，标成「待同步」
+        self.assertEqual(st["downloaders"], [{"name": "qb1", "type": "qbittorrent", "reachable": None,
+                                              "free_bytes": None, "free_text": "", "low": False}])
+        self.assertNotIn("skipped", st["last"])
 
     def test_status_lists_every_assignment_by_name_without_hash(self):
         mine = self.own("Mine.Film", 1)
@@ -210,21 +214,26 @@ class Box(unittest.TestCase):
                              "/state": Rsp(200, {"ok": True})})
         self.assertEqual(self.runner.run_cycle()["status"], "ok")
         st = self.status()
-        self.assertEqual(st["assignment_summary_text"], "派单 5 · 插件管理 2 · 非插件管理 1 · 待加种 1 · 退避 0 · 收回 1")
-        got = [(r["name"], r["action_text"], r["local_text"], r["downloader"], [o["action"] for o in r["ops"]])
-               for r in st["assignments"]]
-        self.assertEqual(got, [
-            ("#5", "新派", "待加种（派单没有下载链接）", "", []),
-            ("#4", "收回", "站点已收回，下载器里已没有", "", []),
-            ("New.Film", "新派", "本轮已加", "qb1", []),
-            ("Theirs.Film", "保持", "已在下载器（非插件管理）·做种中", "qb1", ["takeover"]),
-            ("站点给的名字", "保持", "插件管理·下载中 0%", "qb1", []),
-        ])
-        self.assertEqual([r["filter"] for r in st["assignments"]], ["pending", "", "", "", ""])
-        self.assertEqual(st["default_filter"], "all")
-        self.assertEqual([f["text"] for f in st["filters"]], ["异常", "待加种", "全部"])
+        self.assertEqual(st["assign_stats"], {"count": 5, "size_text": "5.0 KiB", "removing": 1, "problem": 0,
+                                              "pending_count": 1, "pending_bytes": 1024, "pending_text": "1.0 KiB"})
+        for gone in ("assignments", "filters", "default_filter", "assignment_summary_text"):
+            self.assertNotIn(gone, st)
+        g = st["groups"]
+        self.assertEqual((g["count"], g["size_text"]), (5, "5.0 KiB"))
+        # 概况卡与「全部派单」标题同一个口径：条数、体积都含站点收回的
+        self.assertEqual((st["assign_stats"]["count"], st["assign_stats"]["size_text"]), (g["count"], g["size_text"]))
+        secs = {x["key"]: x for x in g["sections"]}
+        self.assertEqual(list(secs), ["active", "seeding", "removing"])          # 没有异常：不出现
+        self.assertEqual([(v["name"], v["badge"], v["note"]) for v in secs["active"]["rows"]],
+                         [("New.Film", "插件管理", "本轮已加"), ("站点给的名字", "插件管理", "")])
+        self.assertEqual([(p["label"], p["count"]) for p in secs["active"]["pending"]], [("派单没有下载链接", 1)])
+        theirs_row = secs["seeding"]["rows"][0]
+        self.assertEqual((theirs_row["name"], theirs_row["badge"], theirs_row["primary"],
+                          [m["action"] for m in theirs_row["more"]]), ("Theirs.Film", "非插件管理", None, ["takeover"]))
+        self.assertIsNone(theirs_row["site"])                                     # 站点没给观测字段：不显示
+        self.assertEqual([(v["name"], v["outcome_text"]) for v in secs["removing"]["rows"]], [("#4", "下载器里已没有")])
+        self.assertEqual(secs["seeding"]["rows"][0]["size_text"], "1.0 KiB")
         self.assertIn("连同文件一起删除", st["takeover_warning"])
-        self.assertEqual(st["assignments"][2]["size_text"], "1.0 KiB")
         blob = json.dumps(st, ensure_ascii=False)
         for h in (mine, theirs, new, gone, later):
             self.assertNotIn(h, blob)
@@ -248,9 +257,12 @@ class Box(unittest.TestCase):
     def test_actions_resume_retry_and_refusals(self):
         mine, theirs, failed, _ = self.seed_actions()
         st = self.status()
-        self.assertEqual(st["default_filter"], "problem")
-        ops = {r["name"]: [o["action"] for o in r["ops"]] for r in st["assignments"]}
-        self.assertEqual(ops, {"Mine.Film": ["resume"], "Theirs.Film": ["takeover"], "#3": ["retry"]})
+        problem = st["groups"]["sections"][0]
+        self.assertEqual(problem["key"], "problem")
+        self.assertEqual([(c["label"], (c["fix"] or {}).get("action")) for c in problem["causes"]],
+                         [("下载器里已暂停", "resume"), ("加种失败 · 站点返回 404", "retry")])
+        rows = {v["name"]: v for sec in st["groups"]["sections"] for v in sec.get("rows", [])}
+        self.assertEqual([m["action"] for m in rows["Theirs.Film"]["more"]], ["takeover"])
         r = self.runner.act("resume", 2)                       # 不是本服务的：拒绝，碰都不碰
         self.assertEqual((r["ok"], r["code"]), (False, "not_owned"))
         self.assertEqual(self.qb.qbc.calls, [])
@@ -289,11 +301,78 @@ class Box(unittest.TestCase):
 
     def test_panel_renders_assignment_table(self):
         html = (ROOT / "templates" / "index.html").read_text("utf-8")
-        for text in ("<th>种子名</th>", "<th class=\"num\">体积</th>", "<th>站点要求</th>", "<th>本地情况</th>",
-                     "<th>下载器</th>", "<th>操作</th>", "/account/seed-group", "s.assignment_summary_text",
-                     "const PAGE = 50", "showModal", "/api/action", "aria-pressed"):
+        for text in ("需要处理", "进行中", "做种中", "即将删除", 'role="progressbar"', 'popovertarget="row-menu"',
+                     "/account/seed-group", "站点上的我的保种组 ↗", "const PAGE = 50", "showModal", "/api/action",
+                     "aria-pressed", "aria-expanded", "torrent_ids", "/api/downloaders/test", 'role="switch"',
+                     "trapFocus", "修改登录密码", "localStorage", 'id="dl-form"', 'id="cfg-toggle"',
+                     'aria-controls="dl-body"', "保存下载器"):
             self.assertIn(text, html)
-        self.assertNotIn("info_hash", html)
+        for gone in ("info_hash", "本轮跳过", "删种闸门：开", "assignment_summary_text", ">站点要求<", "<table"):
+            self.assertNotIn(gone, html)
+        # 开关全用 input.switch：页面上没有别的复选框
+        self.assertEqual(html.count('type="checkbox"'), html.count('type="checkbox" role="switch" class="switch"'))
+
+    # ---------------- 自动接管（执行器同一份规则，这里测外壳把开关传进去） ----------------
+    def test_auto_takeover_follows_setting(self):
+        _, theirs = make_torrent("Theirs.Film")
+        self.qb.qbc.rows.append({"hash": theirs, "name": "Theirs.Film", "save_path": "/media", "tags": "",
+                                 "content_path": "/media/Theirs.Film", "progress": 1, "state": "stalledUP"})
+        self.session({"/assignment": Rsp(200, assignment([item(theirs, 2, "keep")])), "/state": Rsp(200, {"ok": True})})
+        self.assertFalse(self.store.load()["auto_takeover"])             # 默认关
+        self.assertEqual(self.runner.run_cycle()["taken_over"], [])
+        self.assertEqual(self.qb.qbc.calls, [])
+        self.store.save(base_config(auto_takeover=True))
+        report = self.runner.run_cycle()
+        self.assertEqual(report["taken_over"], [theirs])
+        self.assertIn(("tag", theirs, (TAG,)), self.qb.qbc.calls)
+        self.assertTrue(self.store.load_state()["owned"][theirs]["taken_over"])
+        st = self.status()
+        self.assertEqual(st["last"]["taken_over"], 1)
+        took = st["groups"]["sections"][0]["rows"][0]
+        self.assertEqual((took["badge"], took["note"]), ("已接管", "本轮自动接管"))
+        self.assertIn("自动接管 Theirs.Film", LOG.text())
+        self.assertNotIn(theirs, json.dumps(st, ensure_ascii=False))
+
+    # ---------------- 下载器剩余空间（每轮读一次，记进 last_run） ----------------
+    def run_empty(self):
+        self.session({"/assignment": Rsp(200, assignment([item(make_torrent("Big")[1], 9, "add", size=5 * 1024 ** 4,
+                                                                url=f"{SITE}/gone")])),
+                      "/gone": Rsp(404, {}), "/state": Rsp(200, {"ok": True})})
+        return self.runner.run_cycle()
+
+    def test_free_space_captured_once_per_run(self):
+        calls = []
+        orig = self.qb.qbc.sync_maindata
+        self.qb.qbc.sync_maindata = lambda: calls.append(1) or orig()
+        report = self.run_empty()
+        self.assertEqual(calls, [1])
+        self.assertEqual(report["downloaders"], [{"name": "qb1", "type": "qbittorrent", "reachable": True,
+                                                  "free_bytes": 3 * 1024 ** 4}])
+        self.assertEqual(self.store.load_last_run()["downloaders"], report["downloaders"])
+        st = self.status()
+        card = st["downloaders"][0]
+        self.assertEqual((card["reachable"], card["free_text"]), (True, "3.0 TiB"))
+        self.assertTrue(card["low"])           # 还要加 5 TiB，只剩 3 TiB
+        self.assertEqual(st["assign_stats"]["pending_text"], "5.0 TiB")
+        self.qb.qbc.free = 8 * 1024 ** 4
+        self.run_empty()
+        self.assertFalse(self.status()["downloaders"][0]["low"])
+
+    def test_free_space_unreadable_and_unreachable(self):
+        self.qb.qbc.fail_maindata = True
+        report = self.run_empty()
+        self.assertEqual(report["downloaders"][0], {"name": "qb1", "type": "qbittorrent", "reachable": True,
+                                                    "free_bytes": None})
+        card = self.status()["downloaders"][0]
+        self.assertEqual((card["free_bytes"], card["free_text"], card["low"]), (None, "", False))
+        self.qb.qbc = None                     # 登录失败：连不上，也不去读
+        self.qb.reconnect = lambda: None       # 不真去连
+        report = self.run_empty()
+        self.assertEqual(report["downloaders"][0]["reachable"], False)
+        self.assertIsNone(report["downloaders"][0]["free_bytes"])
+        blob = LOG.text() + json.dumps(self.store.load_last_run(), ensure_ascii=False)
+        self.assertNotIn(LAN, blob)
+        self.assertNotIn(QB_PASS, blob)
 
 
 class HumanSize(unittest.TestCase):
@@ -302,10 +381,16 @@ class HumanSize(unittest.TestCase):
                  (112 * 1024 ** 2, "112 MiB"), (2048 * 1024 ** 3, "2.0 TiB"), (1536 * 1024 ** 3, "1.5 TiB"),
                  (None, "-"), ("x", "-")]
         for value, want in cases:
-            self.assertEqual(view.human_size(value), want, value)
+            self.assertEqual(human_size(value), want, value)
 
 
 class ConfigTests(unittest.TestCase):
+    def test_auto_takeover_saved_and_merged(self):
+        cfg, _ = merge_update(normalize(base_config()), {"auto_takeover": True})
+        self.assertTrue(cfg["auto_takeover"])
+        self.assertFalse(normalize(base_config())["auto_takeover"])
+        self.assertTrue(public_view(cfg)["auto_takeover"])
+
     def test_limits_clamped(self):
         cfg = normalize({"max_deletes": 500, "max_adds": -3, "interval": 1})
         self.assertEqual((cfg["max_deletes"], cfg["max_adds"], cfg["interval"]), (20, 0, 10))

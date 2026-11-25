@@ -47,6 +47,7 @@ DEFAULTS: Dict[str, Any] = {
     "max_adds": DEFAULT_MAX_ADDS,
     "max_deletes": 5,
     "delete_files": True,
+    "auto_takeover": False,
 }
 
 
@@ -140,6 +141,7 @@ def normalize(raw: Dict[str, Any]) -> Dict[str, Any]:
     cfg["max_adds"] = _int(raw.get("max_adds"), DEFAULT_MAX_ADDS, 0, HARD_MAX_ADDS)
     cfg["max_deletes"] = _int(raw.get("max_deletes"), 5, 0, HARD_MAX_DELETES)
     cfg["delete_files"] = bool(raw.get("delete_files", True))
+    cfg["auto_takeover"] = bool(raw.get("auto_takeover", False))
     downloaders: List[Dict[str, Any]] = []
     names = set()
     for item in (raw.get("downloaders") or [])[:MAX_DOWNLOADERS]:
@@ -185,7 +187,8 @@ def merge_update(current: Dict[str, Any], body: Dict[str, Any]) -> Tuple[Dict[st
     """
     notes: List[str] = []
     merged = dict(current)
-    for key in ("enabled", "site_url", "save_path", "tag", "interval", "max_adds", "max_deletes", "delete_files"):
+    for key in ("enabled", "site_url", "save_path", "tag", "interval", "max_adds", "max_deletes", "delete_files",
+                "auto_takeover"):
         if key in body:
             merged[key] = body[key]
     new_key = str(body.get("api_key") or "").strip()

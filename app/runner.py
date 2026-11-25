@@ -46,7 +46,7 @@ class Runner:
     def running(self) -> bool:
         return self._lock.locked()
 
-    def act(self, action: str, torrent_id: Any = None) -> Dict[str, Any]:
+    def act(self, action: str, torrent_id: Any = None, torrent_ids: Optional[List[Any]] = None) -> Dict[str, Any]:
         """面板上的手动操作（retry / resume / takeover）。与同步共用一把锁：同步进行中不动账本。
         规则全在搬来的 ``Actions`` 里（复核、只动所选下载器、幂等）；成功后马上同步一次。"""
         cfg = self.store.load()
@@ -59,7 +59,9 @@ class Runner:
                               Settings(save_path=cfg["save_path"], tag=cfg["tag"], delete_files=cfg["delete_files"]),
                               self.store.load_state(), self.store.save_state, log=log)
             rows = self.store.load_last_run().get("assignments") or []
-            if action == "retry":
+            if torrent_ids is not None:
+                result = actions.bulk(rows, action, torrent_ids)
+            elif action == "retry":
                 result = actions.retry(rows, torrent_id)
             elif action == "resume":
                 result = actions.resume(rows, torrent_id)
@@ -67,7 +69,7 @@ class Runner:
                 result = actions.take_over(rows, torrent_id)
         finally:
             self._lock.release()
-        if result.get("code") in ("retried", "retried_all", "resumed", "rechecking", "taken_over"):
+        if result.get("code") in ("retried", "retried_all", "resumed", "rechecking", "taken_over", "bulk_done"):
             self.wake()
             result = {**result, "message": result["message"] + "；马上同步一次"}
         elif not result.get("ok"):
@@ -86,11 +88,13 @@ class Runner:
         try:
             site = RecordingSiteClient(cfg["site_url"], cfg["api_key"], cfg["instance_id"], user_agent=USER_AGENT)
             site.last_counts = {}
+            downloaders = self._build(cfg["downloaders"])
             engine = Engine(
                 site=site,
-                downloaders=self._build(cfg["downloaders"]),
+                downloaders=downloaders,
                 settings=Settings(save_path=cfg["save_path"], tag=cfg["tag"], max_adds=cfg["max_adds"],
-                                  max_deletes=cfg["max_deletes"], delete_files=cfg["delete_files"]),
+                                  max_deletes=cfg["max_deletes"], delete_files=cfg["delete_files"],
+                                  auto_takeover=cfg["auto_takeover"]),
                 state=self.store.load_state(),
                 persist=self.store.save_state,
                 plugin_version=VERSION,
@@ -99,6 +103,9 @@ class Runner:
             )
             report = engine.run().to_dict()
             report["action_counts"] = site.last_counts
+            if not self._stop.is_set():
+                # 每轮一次、只读：各下载器连得上没有、剩余空间（面板的「下载器」卡）
+                report["downloaders"] = downloaders_mod.capture(downloaders, cfg["save_path"], report.get("errors"))
         except Exception as err:
             # 兜底：只记异常类型（异常原文可能带地址）
             log.error("[可乐保种组] 本轮异常中止：%s", type(err).__name__)

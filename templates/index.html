@@ -4,230 +4,393 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>可乐保种组 · Docker 版</title>
+<link rel="stylesheet" href="/panel.css">
 <style>
-  :root {
-    --bg: #f6f6f4; --card: #ffffff; --fg: #1d1d1b; --muted: #6b6b66; --line: #e3e2dd;
-    --accent: #b3261e; --ok-bg: #e7f4ea; --ok-fg: #1e6b34; --warn-bg: #fff4dc; --warn-fg: #7a5200;
-    --err-bg: #fde8e6; --err-fg: #9b1c14; --info-bg: #e8eef8; --info-fg: #24467a; --on-accent: #ffffff;
+  /* 页面自己的排版；组件与设计档位都在 /panel.css（照搬 reelcore-ui，见那里的出处注释） */
+  .header-actions { display: flex; align-items: center; gap: var(--space-12); margin-inline-start: auto; }
+  .header-secondary { display: flex; align-items: center; gap: var(--space-12); font-size: var(--text-md); }
+  .header-more { display: none; }
+  .more-note { padding: var(--space-4) var(--space-12); color: var(--text-muted); font-size: var(--text-xs); }
+  @media (max-width: 640px) {
+    .header-secondary { display: none; }
+    .header-more { display: inline-flex; }
+    .header-actions { gap: var(--space-4); }
   }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #151514; --card: #1f1f1d; --fg: #ecebe6; --muted: #a09f98; --line: #34332f;
-      --accent: #ff7a6e; --ok-bg: #173523; --ok-fg: #8fd9a5; --warn-bg: #3a2d0e; --warn-fg: #f2c86b;
-      --err-bg: #3d1a17; --err-fg: #ffaaa2; --info-bg: #1b2a40; --info-fg: #a9c3ec; --on-accent: #1d0d0b;
-    }
+  main { display: grid; gap: var(--space-16); padding-block: var(--space-16) var(--space-32); }
+  .sync-line { margin: 0; color: var(--text-muted); font-size: var(--text-md); }
+  .stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-12); }
+  @media (max-width: 900px) { .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  @media (max-width: 640px) { .stats { align-items: start; } .stats > .stat-dl { grid-column: 1 / -1; } }
+  .stat { gap: var(--space-4); text-align: start; font: inherit; }
+  .stat-label { display: flex; align-items: center; gap: var(--space-6); color: var(--text-muted); font-size: var(--text-sm); font-weight: var(--weight-semibold); }
+  .stat-value { font-size: var(--text-xl); font-weight: var(--weight-bold); line-height: 1.3; font-variant-numeric: tabular-nums; }
+  .stat-sub { color: var(--text-muted); font-size: var(--text-sm); }
+  button.stat { justify-content: stretch; align-items: start; min-height: 0; border-color: var(--border); background: var(--surface); color: var(--text); cursor: pointer; }
+  button.stat.has-problem { border-color: color-mix(in srgb, var(--error) 55%, var(--border)); }
+  button.stat.has-problem .stat-value { color: var(--error); }
+  .dl-list { display: grid; gap: var(--space-4); margin: 0; padding: 0; list-style: none; font-size: var(--text-sm); }
+  .dl-list li { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-4) var(--space-6); }
+  .dl-list .dl-name { font-weight: var(--weight-semibold); }
+  .section-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--space-12); margin-bottom: var(--space-12); }
+  .section-head h2 { margin: 0; }
+  .issue-list { display: grid; gap: var(--space-6); margin: 0; padding: 0; list-style: none; font-size: var(--text-md); }
+  .issue-where { color: var(--text-muted); }
+  #action-msg { margin-block: var(--space-12); }
+  /* 全部派单：状态条 + 区块 */
+  .asg-total { color: var(--text-muted); font-size: var(--text-md); font-weight: var(--weight-regular); }
+  .status-bar { display: flex; gap: 2px; height: 28px; margin: var(--space-4) 0 var(--space-8); }
+  .status-bar .seg { flex: var(--grow) 1 0; min-width: 12px; min-height: 0; padding: 0; border: 0; border-radius: var(--radius-sm); background: var(--seg); cursor: pointer; }
+  .status-bar .seg[aria-pressed="true"] { outline: 2px solid var(--text); outline-offset: 2px; }
+  .status-bar .seg:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+  .status-bar:has(.seg[aria-pressed="true"]) .seg[aria-pressed="false"] { opacity: .35; }
+  .seg--seeding { --seg: var(--text); }
+  .seg--downloading { --seg: var(--text-muted); }
+  .seg--pending { --seg: var(--control-border); }
+  .seg--problem { --seg: var(--error); }
+  .seg--removing { --seg: var(--border); }
+  .bar-legend { display: flex; flex-wrap: wrap; gap: var(--space-4) var(--space-16); margin: 0 0 var(--space-8); padding: 0; list-style: none; color: var(--text-muted); font-size: var(--text-sm); }
+  .bar-legend li { display: inline-flex; align-items: center; gap: var(--space-6); }
+  .bar-legend i { width: 10px; height: 10px; border-radius: 2px; background: var(--seg); }
+  .bar-clear { margin-inline-start: auto; }
+  .asg { margin-top: var(--space-24); }
+  /* 两层：第一层是区块标题（名字 + 条数小标，不写体积）；第二层是区块里的行（缩进、左边状态图标、小一号、不加粗），
+     条数 · 体积与操作只在第二层 */
+  .asg-title { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-8); margin: 0 0 var(--space-8); font-size: var(--text-base); font-weight: var(--weight-semibold); }
+  .sec-count { min-width: 22px; height: 20px; font-size: var(--text-xs); }
+  .row-list, .cause-list, .lvl2-line { padding-inline-start: var(--space-16) !important; }
+  .asg-row, .cause, .lvl2-line { font-size: var(--text-sm); font-weight: var(--weight-regular); }
+  .lvl2-icon { display: inline-flex; flex: none; width: 16px; margin-inline-end: var(--space-8); color: var(--text-muted); vertical-align: -3px; }
+  .lvl2-icon.is-warn { color: var(--error); }
+  .lvl2-line { margin: 0 0 var(--space-8); color: var(--text-muted); }
+  .cause .row-list .lvl2-icon { display: none; }
+  .asg-meta { color: var(--text-muted); font-size: var(--text-sm); font-weight: var(--weight-regular); }
+  .asg-toggle { gap: var(--space-8); min-height: var(--control-sm); padding: 0; border: 0; background: none; color: var(--text); font: inherit; font-weight: var(--weight-semibold); }
+  .asg-toggle:hover { text-decoration: none; }
+  .asg-toggle .ui-icon { transition: rotate var(--duration-fast) var(--ease-out); }
+  .asg-toggle[aria-expanded="true"] .ui-icon { rotate: 90deg; }
+  .row-list, .cause-list { margin: 0; padding: 0; list-style: none; }
+  .asg-row { display: grid; grid-template-columns: minmax(0, 1fr) 5.5em minmax(9em, 17em) 5em 8.5em; align-items: center; gap: var(--space-4) var(--space-12); padding: var(--space-8) var(--space-4); border-bottom: 1px solid var(--line); font-size: var(--text-sm); }
+  .asg-row:last-child { border-bottom: 0; }
+  .asg-name { min-width: 0; overflow-wrap: anywhere; word-break: break-word; }
+  .asg-name .status-badge { margin-inline-start: var(--space-6); --tone: var(--text-muted); }
+  .asg-note { margin-inline-start: var(--space-6); color: var(--text-muted); font-size: var(--text-xs); }
+  .asg-size { text-align: end; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .asg-detail { min-width: 0; color: var(--text-muted); overflow-wrap: anywhere; }
+  .asg-dl { color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .asg-ops { display: flex; align-items: center; justify-content: flex-end; gap: var(--space-4); }
+  .seen-ok { color: var(--success); }
+  .prog { display: block; height: 6px; margin-bottom: var(--space-4); border-radius: var(--radius-pill); background: var(--surface-muted); overflow: hidden; }
+  .prog > span { display: block; height: 100%; background: var(--text-muted); }
+  .cause { padding: var(--space-8) 0; border-bottom: 1px solid var(--line); }
+  .cause:last-child { border-bottom: 0; }
+  .cause-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-6) var(--space-12); }
+  .cause-label { display: inline-flex; align-items: center; gap: var(--space-6); }
+  .exp-btn { width: var(--control-sm); min-height: var(--control-sm); padding: 0; border: 0; background: none; color: var(--text-muted); }
+  .exp-btn:hover { text-decoration: none; color: var(--text); }
+  .exp-btn .ui-icon { transition: rotate var(--duration-fast) var(--ease-out); }
+  .exp-btn[aria-expanded="true"] .ui-icon { rotate: 90deg; }
+  .cause-meta { color: var(--text-muted); font-size: var(--text-sm); font-variant-numeric: tabular-nums; }
+  .cause-tools { display: flex; gap: var(--space-8); margin-inline-start: auto; }
+  .cause .row-list { margin: var(--space-8) 0 0 var(--space-24); padding-inline-start: var(--space-12) !important; border-inline-start: 2px solid var(--line); }
+  .seeding-search { max-width: 22rem; margin-bottom: var(--space-8); }
+  .seeding-search input { width: 100%; }
+  .empty-line { margin: 0; padding: var(--space-12) 0; color: var(--text-muted); }
+  /* 手机：区块自然往下排，每条派单一张卡片——第一行名字与体积，第二行情况，第三行下载器与操作 */
+  @media (max-width: 640px) {
+    .asg-row { display: flex; flex-wrap: wrap; align-items: center; padding: var(--space-12) var(--space-4); }
+    .asg-name { flex: 1 1 calc(100% - 7em); }   /* 名字与体积占满第一行，下载器总在下一行 */
+    .asg-size { flex: none; color: var(--text-muted); }
+    .asg-detail { flex: 1 1 100%; }
+    .asg-detail:empty { display: none; }
+    .asg-dl { flex: 1 1 50%; }
+    .asg-ops { flex: none; }
+    .cause-tools { margin-inline-start: 0; }
+    .cause .row-list { margin-inline-start: 0; }
   }
-  * { box-sizing: border-box; }
-  [hidden] { display: none !important; }
-  body { margin: 0; background: var(--bg); color: var(--fg);
-         font: 14px/1.55 system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; }
-  main { max-width: 1040px; margin: 0 auto; padding: 20px 16px 48px; }
-  header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-  h1 { font-size: 20px; margin: 0; }
-  h2 { font-size: 15px; margin: 0 0 10px; }
-  .muted { color: var(--muted); }
-  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin-top: 14px; }
-  .alert { border-radius: 10px; padding: 12px 14px; margin-top: 14px; }
-  .alert.ok { background: var(--ok-bg); color: var(--ok-fg); }
-  .alert.warn { background: var(--warn-bg); color: var(--warn-fg); }
-  .alert.err { background: var(--err-bg); color: var(--err-fg); }
-  .alert.info { background: var(--info-bg); color: var(--info-fg); }
-  .stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-top: 14px; }
-  .stat { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
-  .stat .label { font-size: 12px; color: var(--muted); }
-  .stat .value { font-size: 18px; font-weight: 600; margin-top: 2px; font-variant-numeric: tabular-nums; }
-  .stat .sub { font-size: 12px; color: var(--muted); }
-  @media (max-width: 720px) { .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
-  th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--line); vertical-align: top; white-space: nowrap; }
-  th { font-size: 12px; color: var(--muted); font-weight: 500; }
-  td.num, th.num { text-align: right; }
-  table.assign td.wrap { white-space: normal; overflow-wrap: anywhere; word-break: break-word; }
-  table.assign td.name { min-width: 12em; }
-  table.assign td.ops { white-space: nowrap; }
-  button.small { padding: 3px 10px; font-size: 13px; }
-  .filters { margin-top: 10px; }
-  .filters button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
-  .pager { justify-content: center; margin-top: 10px; }
-  #action-msg { min-height: 1.5em; margin-top: 6px; }
-  dialog { border: 1px solid var(--line); border-radius: 12px; background: var(--card); color: var(--fg);
-           max-width: min(480px, calc(100vw - 32px)); padding: 18px; }
-  dialog::backdrop { background: rgba(0, 0, 0, .45); }
-  table.assign td.local { min-width: 7em; }
-  table.assign td.action { min-width: 5em; }
-  a { color: var(--accent); }
-  code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; }
-  .scroll { overflow-x: auto; }
-  ul.plain { list-style: none; padding: 0; margin: 0; }
-  ul.plain li { padding: 4px 0; }
-  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-  button { font: inherit; border-radius: 8px; padding: 7px 14px; cursor: pointer;
-           border: 1px solid var(--line); background: var(--card); color: var(--fg); }
-  button.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
-  button:disabled { opacity: .55; cursor: default; }
-  button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-  form .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 14px; }
-  @media (max-width: 720px) { form .grid { grid-template-columns: 1fr; } form .grid .spacer { display: none; } }
-  label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 3px; }
-  input, select { width: 100%; font: inherit; padding: 7px 9px; border-radius: 8px;
-                  border: 1px solid var(--line); background: var(--bg); color: var(--fg); }
-  input[type=checkbox] { width: auto; }
-  .check { display: flex; gap: 8px; align-items: center; color: var(--fg); font-size: 14px; }
-  .dl { display: grid; grid-template-columns: 1.1fr 1.1fr 2fr 1.2fr 1.2fr auto; gap: 8px; align-items: end; margin-bottom: 8px; }
-  @media (max-width: 720px) { .dl { grid-template-columns: 1fr 1fr; } }
-  .hint { font-size: 12px; color: var(--muted); margin-top: 4px; }
-  details > summary { cursor: pointer; font-weight: 600; }
-  #toast { min-height: 1.5em; }
+  /* 设置 */
+  .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-16) var(--space-16); }
+  @media (max-width: 720px) { .form-grid { grid-template-columns: 1fr; } }
+  .pair { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-12); }
+  .switches { display: grid; justify-items: start; gap: var(--space-12); margin-top: var(--space-16); }
+  .switch-line { display: flex; align-items: center; gap: var(--space-8); }
+  .field-label { display: inline-flex; align-items: center; gap: .4rem; min-width: 0; }
+  .field-label > label { font-size: var(--text-sm); font-weight: var(--weight-semibold); }
+  .fold-head { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-8); }
+  .fold-title { margin: 0; font-size: var(--text-lg); }
+  .fold-title .asg-toggle { justify-content: flex-start; text-align: start; flex-wrap: wrap; font-size: var(--text-lg); }
+  .fold-body { margin-top: var(--space-16); }
+  h3 { margin: var(--space-24) 0 var(--space-12); font-size: var(--text-base); }
+  .dl-row { display: grid; gap: var(--space-8); padding: var(--space-12); margin-bottom: var(--space-12); border: 1px solid var(--line); border-radius: var(--radius); }
+  .dl-fields { display: grid; grid-template-columns: 1fr 1.1fr 2fr 1.2fr 1.2fr; gap: var(--space-8); align-items: end; }
+  @media (max-width: 900px) { .dl-fields { grid-template-columns: 1fr 1fr; } .dl-fields .wide { grid-column: 1 / -1; } }
+  .dl-tools { display: flex; flex-wrap: wrap; gap: var(--space-8); align-items: center; }
+  .form-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-12); margin-top: var(--space-24); }
+  .account-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-8) var(--space-16); }
+  .account-row > p { margin: 0; }
+  #pw-result { margin-top: var(--space-12); }
+  .tip-p { display: block; }
+  .tip-p + .tip-p { margin-top: .4rem; }
 </style>
 </head>
 <body>
-<main>
-  <header>
-    <h1>可乐保种组 <span class="muted" style="font-weight:400">· Docker 版</span></h1>
-    <div class="row">
-      <span class="muted" id="version"></span>
-      <span class="muted" id="auto" role="status"></span>
-      <button class="primary" id="run" title="不等下一轮定时，马上向站点拉一次派单、对齐下载器并上报状态">立即同步</button>
-      <button id="logout" title="退出这个浏览器的登录">退出登录</button>
+<header class="site-header">
+  <div class="page-container site-header__inner">
+    <h1 class="site-brand">可乐保种组 <small>· Docker 版</small></h1>
+    <div class="header-actions">
+      <div class="header-secondary">
+        <a class="site-link" href="https://www.colapt.com/account/seed-group" target="_blank" rel="noopener noreferrer">站点上的我的保种组 ↗</a>
+        <span class="muted version"></span>
+        <button type="button" class="secondary btn-sm" data-logout>退出登录</button>
+      </div>
+      <button type="button" id="run" title="不等下一轮定时，马上向站点拉一次派单、对齐下载器并上报状态">立即同步</button>
+      <!-- 手机上把次要项收进「⋯」：components/MoreMenu.vue -->
+      <span class="more-menu header-more">
+        <button type="button" class="more-trigger" id="hdr-more" popovertarget="hdr-menu" aria-label="更多"><svg class="ui-icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="3.5" cy="8" r="1.3" /><circle cx="8" cy="8" r="1.3" /><circle cx="12.5" cy="8" r="1.3" /></svg></button>
+        <div id="hdr-menu" popover class="more-popover" role="menu">
+          <a class="more-item site-link" href="https://www.colapt.com/account/seed-group" target="_blank" rel="noopener noreferrer">站点上的我的保种组 ↗</a>
+          <button type="button" class="more-item" data-logout>退出登录</button>
+          <div class="more-note version"></div>
+        </div>
+      </span>
     </div>
-  </header>
+  </div>
+</header>
 
-  <div id="headline" class="alert info" role="status">加载中…</div>
+<main class="page-container" id="main">
+  <p class="sync-line" id="auto" role="status"></p>
+
+  <div id="headline" class="notice-bar">
+    <p><span class="tip-anchor" id="hl-time-wrap" hidden><span id="hl-time" class="has-tip" tabindex="0" aria-describedby="hl-time-tip"></span><span id="hl-time-tip" role="tooltip" class="tip-bubble"></span></span><span id="hl-text" role="status">加载中…</span></p>
+  </div>
 
   <section class="stats" aria-label="概况">
-    <div class="stat"><div class="label">派单条数</div><div class="value" id="s-items">-</div><div class="sub" id="s-actions"></div></div>
-    <div class="stat"><div class="label">本服务管理</div><div class="value" id="s-owned">-</div><div class="sub" id="s-owned-size"></div></div>
-    <div class="stat"><div class="label">本轮新加 / 删除</div><div class="value" id="s-addrm">-</div><div class="sub" id="s-gate"></div></div>
-    <div class="stat"><div class="label">申报空间</div><div class="value" id="s-cap">-</div><div class="sub" id="s-next"></div></div>
-  </section>
-
-  <section class="card" id="errors-card" hidden>
-    <h2>错误（按原因码）</h2>
-    <ul class="plain" id="errors"></ul>
-  </section>
-
-  <section class="card" id="skipped-card" hidden>
-    <h2>本轮跳过</h2>
-    <ul class="plain" id="skipped"></ul>
-  </section>
-
-  <section class="card" aria-labelledby="assign-summary">
-    <div class="row" style="justify-content:space-between">
-      <h2 id="assign-summary" style="margin:0">全部派单</h2>
-      <button id="retry-all" type="button" hidden title="清掉所有加种失败的退避，马上同步一次">全部重试加种</button>
+    <div class="ui-card stat">
+      <span class="stat-label">派单</span>
+      <span class="stat-value" id="s-assign">-</span>
+      <span class="stat-sub" id="s-assign-sub"></span>
     </div>
-    <div class="row filters" role="group" aria-label="筛选派单" id="filters"></div>
-    <div id="action-msg" class="muted" role="status" aria-live="polite"></div>
-    <div class="scroll">
-      <table class="assign">
-        <thead><tr><th>种子名</th><th class="num">体积</th><th>站点要求</th><th>本地情况</th><th>下载器</th><th>操作</th></tr></thead>
-        <tbody id="assignments"><tr><td colspan="6" class="muted">加载中…</td></tr></tbody>
-      </table>
+    <div class="ui-card stat">
+      <span class="stat-label">本服务管理</span>
+      <span class="stat-value" id="s-owned">-</span>
+      <span class="stat-sub" id="s-owned-sub"></span>
     </div>
-    <nav class="row pager" aria-label="翻页" id="pager" hidden>
-      <button type="button" id="pg-prev">上一页</button>
-      <span id="pg-info" aria-live="polite"></span>
-      <button type="button" id="pg-next">下一页</button>
-    </nav>
-    <p class="hint">这里只是下载器这一侧的情况；tracker 有没有把它算作做种，以站点<a id="sg-link" href="https://www.colapt.com/account/seed-group" target="_blank" rel="noopener noreferrer">保种组页面</a>为准。
-      只有「插件管理」的种子（本服务加的或你确认接管的、带专用标签）会在站点收回派单时被删除；下载器里已有的同一颗种子、你自己的种子、别站的种子都不会被碰。</p>
+    <button type="button" class="ui-card stat" id="s-problem-card">
+      <span class="stat-label">异常</span>
+      <span class="stat-value" id="s-problem">-</span>
+    </button>
+    <div class="ui-card stat stat-dl">
+      <span class="stat-label">下载器
+        <span class="hint-tip tip-anchor"><button type="button" class="hint-tip-trigger" aria-label="下载器说明" aria-describedby="dl-hint"><span aria-hidden="true">i</span></button><span id="dl-hint" role="tooltip" class="tip-bubble">每轮同步时读一次：连得上没有、所在磁盘的剩余空间（qBittorrent 报的是它默认保存目录所在的盘，Transmission 报的是专用保存目录所在的盘）。剩余空间少于还要加的派单体积时会提醒。</span></span>
+      </span>
+      <ul class="dl-list" id="s-dls"></ul>
+      <span class="stat-sub" id="s-dl-sub"></span>
+      <p class="action-feedback action-feedback--warning" id="s-dl-warn" hidden></p>
+    </div>
   </section>
 
-  <dialog id="confirm" aria-labelledby="confirm-title">
-    <form method="dialog">
-      <h2 id="confirm-title">接管这颗种子？</h2>
-      <p id="confirm-name" class="mono" style="overflow-wrap:anywhere"></p>
-      <p id="confirm-text"></p>
-      <div class="row" style="justify-content:flex-end">
-        <button value="cancel" type="submit">取消</button>
-        <button value="ok" type="submit" class="primary" id="confirm-ok">确认接管</button>
+  <section class="panel" id="issues-card" aria-labelledby="issues-title" hidden>
+    <h2 id="issues-title">需要注意</h2>
+    <ul class="issue-list" id="issues"></ul>
+  </section>
+
+  <section class="panel" aria-labelledby="assign-title">
+    <div class="section-head">
+      <div class="hint-heading">
+        <h2 id="assign-title">全部派单 <span class="asg-total" id="assign-total"></span></h2>
+        <!-- 说明：components/HintTip.vue -->
+        <span class="hint-tip tip-anchor"><button type="button" class="hint-tip-trigger" aria-label="全部派单说明" aria-describedby="assign-hint"><span aria-hidden="true">i</span></button><span id="assign-hint" role="tooltip" class="tip-bubble"><span class="tip-p">这里只是下载器这一侧的情况；tracker 有没有把它算作做种，以站点上的保种组页面为准。</span><span class="tip-p">只有「插件管理」的种子（本服务加的或你确认接管的、带专用标签）会在站点收回派单时被删除；下载器里已有的同一颗种子、你自己的种子、别站的种子都不会被碰。</span><span class="tip-p">状态条按体积画，点一段只看那一组，再点一次看全部。</span></span></span>
       </div>
+    </div>
+    <div id="bar-wrap" hidden>
+      <!-- 按体积的状态条：每段一个按钮（aria-pressed），点了只看那一组；图例只是给眼睛看的，读屏读按钮 -->
+      <div class="status-bar" role="group" aria-label="按状态只看一组" id="bar"></div>
+      <ul class="bar-legend" id="bar-legend" aria-hidden="true"></ul>
+    </div>
+    <p id="action-msg" class="action-feedback action-feedback--info" role="status" aria-live="polite"></p>
+    <p id="assign-empty" class="empty-line" hidden></p>
+
+    <section class="asg" id="sec-problem" aria-labelledby="sec-problem-title" hidden>
+      <h3 class="asg-title" id="sec-problem-title">需要处理 <span class="count-pill sec-count"></span></h3>
+      <ul class="cause-list" id="causes"></ul>
+    </section>
+    <section class="asg" id="sec-active" aria-labelledby="sec-active-title" hidden>
+      <h3 class="asg-title" id="sec-active-title">进行中 <span class="count-pill sec-count"></span></h3>
+      <ul class="row-list" id="active-rows"></ul>
+      <ul class="cause-list" id="pending-lines"></ul>
+    </section>
+    <section class="asg" id="sec-seeding" aria-labelledby="seeding-toggle" hidden>
+      <h3 class="asg-title"><button type="button" class="asg-toggle" id="seeding-toggle" aria-expanded="false" aria-controls="seeding-body"><svg class="ui-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="m6 3 5 5-5 5" /></svg>做种中 <span class="count-pill sec-count"></span></button></h3>
+      <div id="seeding-body" hidden>
+        <p class="lvl2-line"><span class="lvl2-icon" aria-hidden="true"><svg class="ui-icon" viewBox="0 0 16 16"><path d="M8 13.5v-8M4.5 9 8 5.5 11.5 9M3 2.5h10" /></svg></span><span id="seeding-total"></span></p>
+        <div class="seeding-search"><label for="seeding-q" class="sr-only">按名字搜索做种中的种子</label><input id="seeding-q" type="search" placeholder="按名字搜索" autocomplete="off"></div>
+        <ul class="row-list" id="seeding-rows"></ul>
+        <!-- 翻页：components/AppPager.vue -->
+        <nav class="app-pager" aria-label="做种中分页" id="pager" hidden></nav>
+      </div>
+    </section>
+    <section class="asg" id="sec-removing" aria-labelledby="sec-removing-title" hidden>
+      <h3 class="asg-title" id="sec-removing-title">即将删除 <span class="count-pill sec-count"></span></h3>
+      <ul class="row-list" id="removing-rows"></ul>
+    </section>
+    <p id="assign-truncated" class="empty-line" hidden></p>
+  </section>
+  <!-- 行上的「⋯」菜单：components/MoreMenu.vue（原生 popover，全部行共用一个） -->
+  <div id="row-menu" popover class="more-popover" role="menu"></div>
+
+  <!-- 三个设置区块默认收起，写法同「做种中」：标题里一个按钮（aria-expanded），收起时按钮里一行摘要；
+       开 / 关记在 localStorage（读写都包 try/catch），刷新、重新打开页面都还是原样。有没保存的修改或保存出错时一直展开。 -->
+  <section class="panel fold" id="fold-cfg" aria-labelledby="cfg-toggle">
+    <div class="fold-head">
+      <h2 class="fold-title"><button type="button" class="asg-toggle" id="cfg-toggle" aria-expanded="false" aria-controls="cfg-body"><svg class="ui-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="m6 3 5 5-5 5" /></svg>保种设置 <span class="asg-meta" id="cfg-summary"></span></button></h2>
+      <span class="hint-tip tip-anchor"><button type="button" class="hint-tip-trigger" aria-label="实例 ID" aria-describedby="instance-hint"><span aria-hidden="true">i</span></button><span id="instance-hint" role="tooltip" class="tip-bubble">实例 ID：<span class="mono" id="instance_id"></span><br>这个服务向站点上报时用它标识自己；换数据目录会生成新的。</span></span>
+    </div>
+    <!-- 说明文字一律收进标签旁的 ⓘ（components/HintTip.vue 的字段写法：? 在 <label> 外，输入框 aria-describedby 指向气泡）。
+         data-hint 由下面的 hintTips() 展开成 HintTip 的结构。 -->
+    <div class="fold-body" id="cfg-body" hidden>
+    <form id="cfg" autocomplete="off" novalidate>
+      <div class="form-grid">
+        <div class="field">
+          <span class="field-label"><label for="site_url">站点地址</label><span data-hint="site_url_hint" data-hint-label="站点地址说明">一般不用改。改了地址要同时重新填 API Key。</span></span>
+          <input id="site_url" name="site_url" type="url" aria-describedby="site_url_hint">
+        </div>
+        <div class="field">
+          <span class="field-label"><label for="api_key">可乐PT API Key</label><span data-hint="api_key_hint" data-hint-label="API Key 说明">在站点「账号 → Key → API Key」新建，只勾「保种组（seedgroup）」范围。留空 = 不改。</span></span>
+          <input id="api_key" name="api_key" type="password" placeholder="留空 = 不改" aria-describedby="api_key_hint">
+        </div>
+        <div class="field">
+          <span class="field-label"><label for="save_path">专用保存目录</label><span data-hint="save_path_hint" data-hint-label="专用保存目录说明">写下载器视角的路径（下载器里看到的路径，不是这个容器里的）。本服务只管这个目录下、带专用标签的种子。</span></span>
+          <input id="save_path" name="save_path" aria-describedby="save_path_hint">
+        </div>
+        <div class="field">
+          <span class="field-label"><label for="tag">专用标签</label><span data-hint="tag_hint" data-hint-label="专用标签说明">本服务加的种子都打上这个标签。去掉标签就等于交还给你，本服务不再删它。</span></span>
+          <input id="tag" name="tag" aria-describedby="tag_hint">
+        </div>
+        <div class="field">
+          <span class="field-label"><label for="interval">同步间隔（分钟）</label><span data-hint="interval_hint" data-hint-label="同步间隔说明">最少 10 分钟、最多 1440 分钟。站点每 10 分钟派一次单。</span></span>
+          <input id="interval" name="interval" type="number" min="10" max="1440" inputmode="numeric" aria-describedby="interval_hint">
+        </div>
+        <div class="pair">
+          <div class="field">
+            <span class="field-label"><label for="max_adds">每轮最多加种</label><span data-hint="max_adds_hint" data-hint-label="加种上限说明">最多 50。加种失败按 1 小时 / 4 小时 / 1 天退避。</span></span>
+            <input id="max_adds" name="max_adds" type="number" min="0" max="50" inputmode="numeric" aria-describedby="max_adds_hint">
+          </div>
+          <div class="field">
+            <span class="field-label"><label for="max_deletes">每轮最多删种</label><span data-hint="max_deletes_hint" data-hint-label="删种上限说明">最多 20。只删本服务管理的种子。</span></span>
+            <input id="max_deletes" name="max_deletes" type="number" min="0" max="20" inputmode="numeric" aria-describedby="max_deletes_hint">
+          </div>
+        </div>
+      </div>
+      <!-- 开关：input.switch（src/styles/main.css），写法同 features/account/ApiKeysPanel.vue 的范围开关 -->
+      <div class="switches">
+        <span class="switch-line"><label class="switch-row scope-switch"><input id="enabled" name="enabled" type="checkbox" role="switch" class="switch" aria-describedby="enabled_hint">启用</label><span data-hint="enabled_hint" data-hint-label="启用说明">关掉后不再定时同步，也不加种、不删种。</span></span>
+        <span class="switch-line"><label class="switch-row scope-switch"><input id="delete_files" name="delete_files" type="checkbox" role="switch" class="switch" aria-describedby="delete_files_hint">收回时连文件一起删</label><span data-hint="delete_files_hint" data-hint-label="收回时连文件一起删说明">站点收回派单时删种子也删文件；内容被别的种子共用时只删种子。</span></span>
+        <span class="switch-line"><label class="switch-row scope-switch"><input id="auto_takeover" name="auto_takeover" type="checkbox" role="switch" class="switch" aria-describedby="auto_takeover_hint">自动接管</label><span data-hint="auto_takeover_hint" data-hint-label="自动接管说明">开启后，下载器里已经在做种的同一颗种子会被自动接管；站点收回这条派单时，它会被删除（共用内容时只删种子）。只接已下完且在做种的，每轮最多 10 颗，不挪文件。</span></span>
+      </div>
+
+
+      <div class="form-actions">
+        <button type="submit" id="cfg-save">保存</button>
+        <button type="button" class="secondary" id="cfg-revert" hidden>撤销修改</button>
+      </div>
+      <p id="toast" class="action-feedback" role="status" style="margin-top:var(--space-12)"></p>
     </form>
-  </dialog>
+    </div>
+  </section>
 
-  <section class="card">
-    <details id="cfg-details">
-      <summary>设置</summary>
-      <form id="cfg" autocomplete="off" style="margin-top:14px">
-        <div class="grid">
-          <div>
-            <label for="api_key">可乐PT API Key</label>
-            <input id="api_key" name="api_key" type="password" placeholder="留空 = 不改">
-            <div class="hint" id="api_key_hint">在站点「账号 → Key → API Key」新建，只勾「保种组（seedgroup）」范围。</div>
-          </div>
-          <div>
-            <label for="site_url">站点地址</label>
-            <input id="site_url" name="site_url" type="url">
-            <div class="hint">一般不用改。改了地址要同时重新填 API Key。</div>
-          </div>
-          <div>
-            <label for="save_path">专用保存目录（下载器视角）</label>
-            <input id="save_path" name="save_path">
-          </div>
-          <div>
-            <label for="tag">专用标签</label>
-            <input id="tag" name="tag">
-          </div>
-          <div>
-            <label for="interval">同步间隔（分钟，≥ 10）</label>
-            <input id="interval" name="interval" type="number" min="10" max="1440">
-          </div>
-          <div class="row" style="align-items:end">
-            <div style="flex:1"><label for="max_adds">每轮最多加种（≤ 50）</label><input id="max_adds" name="max_adds" type="number" min="0" max="50"></div>
-            <div style="flex:1"><label for="max_deletes">每轮最多删种（≤ 20）</label><input id="max_deletes" name="max_deletes" type="number" min="0" max="20"></div>
-          </div>
-          <label class="check"><input id="enabled" name="enabled" type="checkbox"> 启用</label>
-          <label class="check"><input id="delete_files" name="delete_files" type="checkbox"> 站点收回时连文件一起删（内容被别的种子共用时只删种子）</label>
-        </div>
+  <section class="panel fold" id="fold-dl" aria-labelledby="dl-toggle">
+    <div class="fold-head">
+      <h2 class="fold-title"><button type="button" class="asg-toggle" id="dl-toggle" aria-expanded="false" aria-controls="dl-body"><svg class="ui-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="m6 3 5 5-5 5" /></svg>下载器 <span class="asg-meta" id="dl-summary"></span></button></h2>
+      <span data-hint="dls_hint" data-hint-label="下载器说明"><span class="tip-p">地址写容器能访问到的地址，例如 <code>http://192.168.1.10:8080</code>；Transmission 默认路径 <code>/transmission/rpc</code>。</span><span class="tip-p">密码留空 = 沿用已保存的（改了地址或用户名就要重填）。</span><span class="tip-p">多台时新种加到本服务管理最少的那台。</span></span>
+    </div>
+    <div class="fold-body" id="dl-body" hidden>
+    <form id="dl-form" autocomplete="off" novalidate>
+      <div id="dls" role="group" aria-label="下载器列表"></div>
+      <button type="button" class="secondary btn-sm" id="add-dl">添加下载器</button>
+      <div class="form-actions">
+        <button type="submit" id="dl-save">保存下载器</button>
+        <button type="button" class="secondary" id="dl-revert" hidden>撤销修改</button>
+      </div>
+      <p id="dl-toast" class="action-feedback" role="status" style="margin-top:var(--space-12)"></p>
+    </form>
+    </div>
+  </section>
 
-        <h2 style="margin-top:18px">下载器</h2>
-        <div id="dls"></div>
-        <button type="button" id="add-dl">添加下载器</button>
-        <div class="hint">地址写容器能访问到的地址，例如 <code>http://192.168.1.10:8080</code>；Transmission 默认路径 <code>/transmission/rpc</code>。密码留空 = 沿用已保存的（改了地址或用户名就要重填）。多台时新种加到本服务管理最少的那台。</div>
-
-        <div class="row" style="margin-top:16px">
-          <button class="primary" type="submit">保存</button>
-          <span id="toast" class="muted" role="status"></span>
-        </div>
-        <p class="hint">实例 ID：<span class="mono" id="instance_id"></span></p>
-      </form>
-
-      <form id="pw" style="margin-top:18px;border-top:1px solid var(--line);padding-top:14px">
-        <h2>登录密码</h2>
-        <div class="grid">
-          <div>
-            <label for="pw_current">当前密码</label>
-            <input id="pw_current" type="password" autocomplete="current-password" required>
-          </div>
-          <div class="spacer"></div>
-          <div>
-            <label for="pw_new">新密码（至少 8 位）</label>
-            <input id="pw_new" type="password" autocomplete="new-password" minlength="8" required>
-          </div>
-          <div>
-            <label for="pw_confirm">再输一次新密码</label>
-            <input id="pw_confirm" type="password" autocomplete="new-password" minlength="8" required>
-          </div>
-        </div>
-        <div class="row" style="margin-top:12px">
-          <button class="primary" type="submit" id="pw_save">修改密码</button>
-          <span id="pw_toast" class="muted" role="status"></span>
-        </div>
-        <p class="hint" id="pw_hint">改完后其它浏览器的登录会全部退出。忘了密码：删掉数据目录里的 <code>auth.json</code> 并重启容器，日志里会显示新的初始密码。</p>
-      </form>
-    </details>
+  <section class="panel fold" id="fold-account" aria-labelledby="account-toggle">
+    <div class="fold-head">
+      <h2 class="fold-title"><button type="button" class="asg-toggle" id="account-toggle" aria-expanded="false" aria-controls="account-body"><svg class="ui-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="m6 3 5 5-5 5" /></svg>账号 <span class="asg-meta" id="account-summary"></span></button></h2>
+      <span data-hint="account_hint" data-hint-label="账号说明"><span class="tip-p">改密码后，其它浏览器的登录会全部退出。</span><span class="tip-p">忘了密码：删掉数据目录里的 <code>auth.json</code> 并重启容器，日志里会显示新的初始密码。</span></span>
+    </div>
+    <div class="fold-body" id="account-body" hidden>
+    <div class="account-row">
+      <p>面板登录密码</p>
+      <button type="button" class="secondary btn-sm" id="pw-open" aria-describedby="account_hint">修改登录密码</button>
+      <p class="field-hint" id="pw-env" hidden>密码由环境变量 COLASEEDGROUP_PASSWORD 设定，面板里不能改；要改就改环境变量并重建容器。</p>
+    </div>
+    <p id="pw-result" class="action-feedback action-feedback--success" role="status"></p>
+    </div>
   </section>
 </main>
 
+<!-- 接管确认：components/ConfirmDialog.vue（外壳 AppDialog.vue） -->
+<dialog id="confirm" class="app-dialog" tabindex="-1" aria-labelledby="confirm-title">
+  <header class="app-dialog-header"><h2 id="confirm-title">接管这颗种子？</h2></header>
+  <form class="app-dialog-form" id="confirm-form">
+    <div class="app-dialog-body">
+      <p id="confirm-name" class="mono"></p>
+      <p id="confirm-text"></p>
+    </div>
+    <footer class="app-dialog-footer">
+      <button type="button" class="secondary" data-dialog-initial data-close>取消</button>
+      <button type="submit" class="confirm-danger" id="confirm-ok">确认接管</button>
+    </footer>
+  </form>
+</dialog>
+
+<!-- 修改登录密码：components/AppDialog.vue（closable，表单写法同其注释里的示例） -->
+<dialog id="pw-dialog" class="app-dialog" tabindex="-1" aria-labelledby="pw-title">
+  <header class="app-dialog-header">
+    <h2 id="pw-title">修改登录密码</h2>
+    <button type="button" class="app-dialog-close" aria-label="关闭" data-close><svg class="ui-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8" /></svg></button>
+  </header>
+  <form class="app-dialog-form" id="pw-form" novalidate>
+    <div class="app-dialog-body">
+      <div class="field">
+        <label for="pw_current">当前密码</label>
+        <input id="pw_current" type="password" autocomplete="current-password" data-autofocus>
+      </div>
+      <div class="field">
+        <label for="pw_new">新密码</label>
+        <input id="pw_new" type="password" autocomplete="new-password" minlength="8" aria-describedby="pw_new_hint">
+        <p class="field-hint" id="pw_new_hint">至少 8 位。改完后其它浏览器的登录会全部退出。</p>
+      </div>
+      <div class="field">
+        <label for="pw_confirm">再输一次新密码</label>
+        <input id="pw_confirm" type="password" autocomplete="new-password" minlength="8">
+      </div>
+      <p id="pw-error" class="action-feedback" role="alert"></p>
+    </div>
+    <footer class="app-dialog-footer">
+      <button type="button" class="secondary" data-close>取消</button>
+      <button type="submit" id="pw-save">修改密码</button>
+    </footer>
+  </form>
+</dialog>
+
 <template id="dl-row">
-  <div class="dl">
-    <div><label>名称</label><input data-k="name" placeholder="qb1"></div>
-    <div><label>类型</label>
-      <select data-k="type"><option value="qbittorrent">qBittorrent</option><option value="transmission">Transmission</option></select></div>
-    <div><label>地址</label><input data-k="url" placeholder="http://192.168.1.10:8080"></div>
-    <div><label>用户名</label><input data-k="username"></div>
-    <div><label>密码</label><input data-k="password" type="password"></div>
-    <div><button type="button" data-rm>删除</button></div>
+  <div class="dl-row">
+    <div class="dl-fields">
+      <div class="field"><label>名称</label><input data-k="name" placeholder="qb1"></div>
+      <div class="field"><label>类型</label>
+        <select data-k="type"><option value="qbittorrent">qBittorrent</option><option value="transmission">Transmission</option></select></div>
+      <div class="field wide"><label>地址</label><input data-k="url" placeholder="http://192.168.1.10:8080"></div>
+      <div class="field"><label>用户名</label><input data-k="username" autocomplete="off"></div>
+      <div class="field"><label>密码</label><input data-k="password" type="password" autocomplete="new-password"></div>
+    </div>
+    <div class="dl-tools">
+      <button type="button" class="secondary btn-sm" data-test>测试连接</button>
+      <button type="button" class="secondary danger btn-sm" data-rm>删除</button>
+    </div>
+    <p class="action-feedback" data-result role="status"></p>
   </div>
 </template>
 
@@ -235,216 +398,752 @@
 "use strict";
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-const fmtTime = (t) => t ? new Date(t * 1000).toLocaleString("zh-CN", {hour12: false}) : "-";
-const ACTION = {keep: "保持", add: "新派", remove: "收回"};
+// HintTip（components/HintTip.vue）：<span data-hint="id" data-hint-label="名称">说明</span> 展开成
+// 「ⓘ 按钮 + 气泡」，气泡留在 DOM 里，aria-describedby 始终指得到；交互在下面 useTip 的移植里
+function hintTips() {
+  for (const el of document.querySelectorAll("[data-hint]")) {
+    const wrap = document.createElement("span");
+    wrap.className = "hint-tip tip-anchor";
+    wrap.innerHTML = `<button type="button" class="hint-tip-trigger" aria-label="${esc(el.dataset.hintLabel || "说明")}" aria-describedby="${esc(el.dataset.hint)}"><span aria-hidden="true">i</span></button>`;
+    const bubble = document.createElement("span");
+    bubble.id = el.dataset.hint;
+    bubble.setAttribute("role", "tooltip");
+    bubble.className = "tip-bubble";
+    bubble.append(...el.childNodes);
+    wrap.append(bubble);
+    el.replaceWith(wrap);
+  }
+}
+hintTips();
+const fullTime = (t) => t ? new Date(t * 1000).toLocaleString("zh-CN", {hour12: false}) : "-";
+const hhmm = (t) => new Date(t * 1000).toLocaleTimeString("zh-CN", {hour: "2-digit", minute: "2-digit", hour12: false});
 const TRIGGER = {startup: "启动后同步", schedule: "定时同步", manual: "手动同步"};
+
+function relTime(t, now) {
+  const d = Math.max(0, Math.round(now - t));
+  if (d < 60) return "刚刚";
+  if (d < 3600) return `${Math.floor(d / 60)} 分钟前`;
+  if (d < 86400) return `${Math.floor(d / 3600)} 小时前`;
+  return `${Math.floor(d / 86400)} 天前`;
+}
+function setText(el, text) { if (el.textContent !== text) el.textContent = text; }
+function setHTML(el, html) { if (el._html !== html) { el.innerHTML = html; el._html = html; } }
+function feedback(el, tone, text) {
+  el.className = "action-feedback" + (tone && tone !== "error" ? " action-feedback--" + tone : "");
+  el.textContent = text || "";
+}
 
 async function api(path, opts = {}) {
   const r = await fetch(path, {headers: {"Content-Type": "application/json"}, ...opts});
   if (r.status === 401) { location.replace("/login"); throw new Error("需要登录"); }
   const body = await r.json().catch(() => ({}));
-  if (!r.ok) throw Object.assign(new Error("http " + r.status), {body});
+  if (!r.ok) throw Object.assign(new Error("http " + r.status), {status: r.status, body});
   return body;
 }
 
-function renderStatus(s) {
-  $("version").textContent = "v" + s.version;
-  const h = $("headline");
+// ---------------- 提示气泡：components/useTip.ts（HintTip.vue 与 Tooltip.vue 共用的开合与定位） ----------------
+// 悬停 120ms 后打开、键盘聚焦立即打开；离开 100ms 后关（可以移进气泡）；点击 / 轻点固定，再点一次关；
+// 点别处或 Esc 关。气泡 position:fixed，下方放不下就翻到上方，并夹在视口内 8px。
+// 这里不能一个组件一个实例，就按 .tip-anchor（触发元素 + .tip-bubble）在事件委托里懒建控制器。
+const TIP_SHOW_DELAY = 120, TIP_HIDE_DELAY = 100, TIP_EDGE = 8, TIP_GAP = 6;
+const tipCtl = new WeakMap();
+function tipFor(anchor) {
+  let ctl = tipCtl.get(anchor);
+  if (ctl) return ctl;
+  const bubble = anchor.querySelector(".tip-bubble");
+  const trigger = () => anchor.firstElementChild;
+  let open = false, pinned = false, showTimer, hideTimer, hovering = false, frame = 0;
+  const clearTimers = () => { clearTimeout(showTimer); clearTimeout(hideTimer); showTimer = hideTimer = undefined; };
+  function place() {
+    const vw = document.documentElement.clientWidth, vh = window.innerHeight;
+    bubble.style.left = "0px"; bubble.style.top = "0px";
+    const origin = bubble.getBoundingClientRect(), r = trigger().getBoundingClientRect();
+    const w = origin.width, h = origin.height;
+    let left = Math.max(TIP_EDGE, Math.min(r.left, vw - w - TIP_EDGE));
+    let top = r.bottom + TIP_GAP;
+    bubble.dataset.placement = "bottom";
+    if (top + h > vh - TIP_EDGE && r.top - TIP_GAP - h >= TIP_EDGE) { top = r.top - TIP_GAP - h; bubble.dataset.placement = "top"; }
+    bubble.style.left = `${left - origin.left}px`; bubble.style.top = `${top - origin.top}px`;
+  }
+  const schedulePlace = () => { if (!frame) frame = requestAnimationFrame(() => { frame = 0; place(); }); };
+  const inside = (node) => !!node && anchor.contains(node);
+  const onDocPointerDown = (e) => { if (!inside(e.target)) hide(); };
+  function onDocKeydown(e) {
+    if (e.key !== "Escape") return;
+    // 先关提示；焦点在触发元素上时吞掉这次 Esc，免得外面的对话框也跟着关
+    if (e.target === trigger()) { e.preventDefault(); e.stopPropagation(); }
+    hide();
+  }
+  function listen(on) {
+    const m = on ? "addEventListener" : "removeEventListener";
+    document[m]("pointerdown", onDocPointerDown, true);
+    document[m]("keydown", onDocKeydown, true);
+    window[m]("scroll", schedulePlace, {capture: true, passive: true});
+    window[m]("resize", schedulePlace);
+  }
+  function show() { clearTimers(); if (open) return; open = true; bubble.classList.add("is-open"); place(); listen(true); }
+  function hide() { clearTimers(); pinned = false; if (!open) return; open = false; bubble.classList.remove("is-open"); listen(false); }
+  ctl = {
+    enter(e) { if (e.pointerType === "touch") return; hovering = true; clearTimeout(hideTimer); hideTimer = undefined; if (!open && !showTimer) showTimer = setTimeout(show, TIP_SHOW_DELAY); },
+    leave(e) {
+      if (e.pointerType === "touch") return;
+      hovering = false; clearTimeout(showTimer); showTimer = undefined;
+      if (pinned || (open && document.activeElement === trigger())) return;
+      if (!hideTimer) hideTimer = setTimeout(hide, TIP_HIDE_DELAY);
+    },
+    click() { if (pinned) return hide(); pinned = true; show(); },
+    focus() { show(); },
+    blur(e) { if (e && inside(e.relatedTarget)) return; if (!hovering) hide(); },
+    hide,
+  };
+  tipCtl.set(anchor, ctl);
+  return ctl;
+}
+const anchorOf = (node) => node instanceof Element ? node.closest(".tip-anchor") : null;
+document.addEventListener("pointerover", (e) => { const a = anchorOf(e.target); if (a && !a.contains(e.relatedTarget)) tipFor(a).enter(e); });
+document.addEventListener("pointerout", (e) => { const a = anchorOf(e.target); if (a && !a.contains(e.relatedTarget)) tipFor(a).leave(e); });
+document.addEventListener("focusin", (e) => { const a = anchorOf(e.target); if (a && e.target === a.firstElementChild) tipFor(a).focus(); });
+document.addEventListener("focusout", (e) => { const a = anchorOf(e.target); if (a) tipFor(a).blur(e); });
+document.addEventListener("click", (e) => { const a = anchorOf(e.target); if (a && a.firstElementChild.contains(e.target)) tipFor(a).click(); });
+
+/** 行内重复出现的提示（components/Tooltip.vue 的 :focusable="false"）：不加 Tab 站，文字另以 sr-only 读给读屏。 */
+function inlineTip(visible, tip) {
+  return `<span class="tip-anchor"><span class="has-tip">${esc(visible)}</span><span class="sr-only">（${esc(tip)}）</span>`
+    + `<span class="tip-bubble" role="tooltip" aria-hidden="true">${esc(tip)}</span></span>`;
+}
+
+// ---------------- 对话框：components/AppDialog.vue ----------------
+// 原生 <dialog> + showModal；Tab 在对话框里循环（焦点陷阱），Esc 与「关闭」在 busy 时不动；
+// 首个焦点：data-autofocus，其次 data-dialog-initial，否则对话框本身；关闭后焦点回到打开它的元素。
+function trapFocus(event) {
+  const dlg = event.currentTarget;
+  if (event.key !== "Tab") return;
+  const controls = [...dlg.querySelectorAll("button, input, textarea, select, a[href], [tabindex]")]
+    .filter((el) => !el.matches(':disabled, [tabindex="-1"]') && el.getClientRects().length > 0);
+  const first = controls[0], last = controls[controls.length - 1];
+  if (!first || !last) { event.preventDefault(); dlg.focus(); return; }
+  if (event.shiftKey && (document.activeElement === first || !dlg.contains(document.activeElement))) { event.preventDefault(); last.focus(); }
+  else if (!event.shiftKey && (document.activeElement === last || !dlg.contains(document.activeElement))) { event.preventDefault(); first.focus(); }
+}
+const dialogs = {
+  setup(dlg, onRequestClose) {
+    dlg.addEventListener("keydown", trapFocus);
+    dlg.addEventListener("cancel", (e) => { e.preventDefault(); if (dlg.getAttribute("aria-busy") !== "true") onRequestClose(); });
+    dlg.addEventListener("click", (e) => { if (e.target.closest("[data-close]") && dlg.getAttribute("aria-busy") !== "true") onRequestClose(); });
+  },
+  open(dlg) {
+    dlg._returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    dlg.setAttribute("aria-busy", "false");
+    dlg.showModal();
+    const start = dlg.querySelector("[data-autofocus]") || dlg.querySelector("[data-dialog-initial]") || dlg;
+    start.focus({preventScroll: true});
+  },
+  close(dlg) {
+    if (dlg.open) dlg.close();
+    const back = dlg._returnFocus;
+    dlg._returnFocus = null;
+    if (back && back.isConnected) back.focus({preventScroll: true});
+  },
+  busy(dlg, on) {
+    dlg.setAttribute("aria-busy", on ? "true" : "false");
+    for (const b of dlg.querySelectorAll("button")) b.disabled = on;
+  },
+};
+
+// ---------------- 「⋯」更多菜单：components/MoreMenu.vue（原生 popover：点外面或 Esc 关） ----------------
+$("hdr-menu").addEventListener("toggle", (event) => {
+  const menu = event.currentTarget, trigger = $("hdr-more");
+  if (event.newState !== "open") return;
+  const r = trigger.getBoundingClientRect(), w = menu.offsetWidth, h = menu.offsetHeight;
+  const below = r.bottom + 4 + h <= window.innerHeight - 8;
+  menu.style.top = `${below ? r.bottom + 4 : Math.max(8, r.top - 4 - h)}px`;
+  menu.style.left = `${Math.min(Math.max(8, r.right - w), window.innerWidth - w - 8)}px`;
+  const first = menu.querySelector(".more-item:not(:disabled)");
+  if (first) first.focus();
+});
+$("hdr-menu").addEventListener("click", (event) => {
+  if (event.target.closest(".more-item")) { event.currentTarget.hidePopover(); $("hdr-more").focus({preventScroll: true}); }
+});
+
+// ---------------- 页头与概况 ----------------
+function renderHeader(s) {
+  for (const el of document.querySelectorAll(".version")) setText(el, "v" + s.version);
+  let auto;
+  if (!s.configured) auto = "未配置，暂停中";
+  else if (s.running) auto = "正在同步…";
+  else auto = `自动同步中 · 每 ${s.interval} 分钟` + (s.next_run_at ? ` · 下次 ${hhmm(s.next_run_at)}` : "");
+  setText($("auto"), auto);
+  $("run").disabled = s.running || !s.configured;
+
   const last = s.last;
-  let cls = "info", text;
+  let tone = "", text;
+  $("hl-time-wrap").hidden = !(s.configured && last);
   if (!s.configured) {
-    text = "还没配置好：" + s.missing.map((m) => m.text).join("、") + "。在下方「设置」里填好后保存。";
-    cls = "warn";
-    $("cfg-details").open = true;
+    tone = "warning";
+    text = "还没配置好：" + s.missing.map((m) => m.text).join("、") + "。在下方「保种设置」里填好后保存。";
   } else if (!last) {
     text = s.running ? "正在进行第一次同步…" : "还没有同步过";
   } else {
-    text = fmtTime(last.finished_at) + " · " + (TRIGGER[last.trigger] || "") + " · " + last.status_text;
-    if (last.outdated) text += `（站点要求 ≥ ${last.min_plugin_version}，当前 ${s.version}，请更新）`;
-    if (last.status === "ok" && !last.state_reported) text += " · 状态上报失败";
-    else if (last.status === "ok") text += " · 状态已上报";
-    cls = last.status === "ok" ? (last.errors.length ? "warn" : "ok") : (["outdated", "stopped", "busy"].includes(last.status) ? "warn" : "err");
-    if (s.running) text += " · 正在同步…";
+    setText($("hl-time"), relTime(last.finished_at, s.now));
+    setText($("hl-time-tip"), "上次同步：" + fullTime(last.finished_at));
+    const parts = [TRIGGER[last.trigger] || "同步", last.status_text];
+    if (last.outdated) parts[1] += `（站点要求 ≥ ${last.min_plugin_version}，当前 ${s.version}，请更新）`;
+    if (last.status === "ok") parts.push(last.state_reported ? "已上报" : "上报失败");
+    if (s.running) parts.push("正在同步…");
+    text = " · " + parts.join(" · ");
+    tone = last.status === "ok" ? (last.errors.length || !last.state_reported ? "warning" : "success")
+      : (["outdated", "stopped", "busy"].includes(last.status) ? "warning" : "error");
   }
-  h.className = "alert " + cls;
-  h.textContent = text;
-
-  $("s-items").textContent = last && last.items != null ? last.items : "-";
-  $("s-actions").textContent = last ? Object.entries(last.action_counts || {}).map(([k, v]) => `${ACTION[k] || k} ${v}`).join(" · ") : "";
-  $("s-owned").textContent = s.owned_count + " 个";
-  $("s-owned-size").textContent = s.owned_total_text;
-  $("s-addrm").textContent = last ? `${last.added} / ${last.removed}` : "-";
-  $("s-gate").textContent = last && last.status === "ok" ? (last.deletes_allowed ? "删种闸门：开" : "删种闸门：关") : "";
-  $("s-cap").textContent = last ? last.capacity_text : "-";
-  $("s-next").textContent = s.next_run_at ? "下次同步 " + fmtTime(s.next_run_at) : (s.running ? "正在同步" : "");
-  $("auto").textContent = !s.configured ? "未配置，暂停中" : (s.running ? "正在同步…" : `自动同步中 · 每 ${s.interval} 分钟`);
-
-  const errs = last ? last.errors : [];
-  $("errors-card").hidden = !errs.length;
-  $("errors").innerHTML = errs.map((e) => `<li>${esc(e.where)}：${esc(e.text)} <code>${esc(e.code)}</code></li>`).join("");
-  const sk = last ? last.skipped : [];
-  $("skipped-card").hidden = !sk.length;
-  $("skipped").innerHTML = sk.map((e) => `<li>${esc(e.text)} × ${e.count} <code>${esc(e.code)}</code></li>`).join("");
-
-  renderAssignments(s);
-  $("run").disabled = s.running || !s.configured;
+  $("headline").className = "notice-bar" + (tone ? " notice-bar--" + tone : "");
+  setText($("hl-text"), text);
 }
 
-// ---------------- 派单表：筛选 + 分页 + 操作 ----------------
-// 行、顺序、文案、筛选与可做的操作都由执行器给出（与 MoviePilot 插件页一致），这里只排版
+function renderStats(s) {
+  const st = s.assign_stats, has = !!s.groups;
+  setText($("s-assign"), has ? `${st.count} 条` : "-");
+  setText($("s-assign-sub"), has ? st.size_text + (st.removing ? ` · 收回中 ${st.removing}` : "") : "下一轮同步后显示");
+  setText($("s-owned"), `${s.owned_count} 个`);
+  setText($("s-owned-sub"), s.owned_total_text);
+  setText($("s-problem"), has ? String(st.problem) : "-");
+  // 说明不占位置：「点此只看异常」只在无障碍名称里
+  $("s-problem-card").classList.toggle("has-problem", has && st.problem > 0);
+  $("s-problem-card").setAttribute("aria-label", has ? `异常 ${st.problem} 条，只看异常` : "异常");
+
+  const dls = s.downloaders || [];
+  setText($("dl-summary"), dlSummary(dls));
+  const html = dls.length ? dls.map((d) => {
+    const badge = d.reachable === null ? `<span class="status-badge">待同步</span>`
+      : (d.reachable ? `<span class="status-badge status-badge--success">连得上</span>` : `<span class="status-badge status-badge--error">连不上</span>`);
+    const free = d.reachable === null ? "" : (d.free_bytes === null ? `<span class="muted">剩余：读不到</span>` : `<span>剩余 ${esc(d.free_text)}</span>`);
+    return `<li><span class="dl-name">${esc(d.name)}</span>${badge}${free}</li>`;
+  }).join("") : `<li class="muted">还没配置</li>`;
+  setHTML($("s-dls"), html);
+  const cap = s.last && s.last.capacity_text;
+  setText($("s-dl-sub"), [cap ? `申报 ${cap}` : "", st.pending_bytes ? `待加 ${st.pending_text}` : ""].filter(Boolean).join(" · "));
+  const low = dls.filter((d) => d.low).map((d) => d.name);
+  $("s-dl-warn").hidden = !low.length;
+  setText($("s-dl-warn"), low.length ? `${low.join("、")} 的剩余空间少于还要加的 ${st.pending_text}` : "");
+
+  const errs = s.last ? s.last.errors : [];
+  $("issues-card").hidden = !errs.length;
+  setHTML($("issues"), errs.map((e) => `<li><span class="issue-where">${esc(e.where)}：</span>${inlineTip(e.text, "原因码 " + e.code)}</li>`).join(""));
+}
+
+// ---------------- 全部派单：状态条 + 区块 ----------------
+// 分组、顺序、文案、可做的操作都由执行器给出（engine.group_assignments，与 MoviePilot 插件页同一份），这里只排版。
+// 每 5 秒刷新：内容没变就不重画；要重画时，焦点按 data-fk 找回同一个控件；展开了哪些、搜什么、第几页都记在 view 里。
 const PAGE = 50;
-const view = {filter: null, page: 1, sig: "", fsig: "", rows: null, warning: ""};
-function renderAssignments(s) {
-  const rows = s.assignments;
-  view.rows = rows; view.warning = s.takeover_warning;
-  $("assign-summary").textContent = rows ? s.assignment_summary_text : "全部派单";
-  $("retry-all").hidden = !(rows || []).some((r) => r.ops.some((o) => o.action === "retry"));
-  if (view.filter === null && rows) view.filter = s.default_filter;
-  const counts = {all: (rows || []).length, problem: 0, pending: 0};
-  for (const r of rows || []) if (r.filter) counts[r.filter] += 1;
-  const f = view.filter || "all";
-  const fhtml = rows ? s.filters.map((x) => `<button type="button" class="small" data-filter="${esc(x.key)}"
-      aria-pressed="${x.key === f}">${esc(x.text)}（${counts[x.key]}）</button>`).join("") : "";
-  if (fhtml !== view.fsig) { $("filters").innerHTML = fhtml; view.fsig = fhtml; }
-  const shown = (rows || []).filter((r) => f === "all" || r.filter === f);
-  const pages = Math.max(1, Math.ceil(shown.length / PAGE));
-  view.page = Math.min(Math.max(1, view.page), pages);
-  const slice = shown.slice((view.page - 1) * PAGE, view.page * PAGE);
-  const empty = (t) => `<tr><td colspan="6" class="muted">${esc(t)}</td></tr>`;
-  const EMPTY = {problem: "没有异常的派单", pending: "没有待加种的派单", all: "站点暂时没有派单"};
-  let html;
-  if (!rows) html = empty(!s.last ? "还没有运行过" : (s.last.status === "ok" ? "下一轮运行后显示全部派单" : "还没有拿到派单"));
-  else if (!slice.length) html = empty(EMPTY[f]);
-  else html = slice.map((r) => `<tr>
-      <td class="wrap name">${esc(r.name)}</td><td class="num">${esc(r.size_text)}</td>
-      <td class="wrap action">${esc(r.action_text)}</td><td class="wrap local">${esc(r.local_text)}</td>
-      <td>${esc(r.downloader || "—")}</td>
-      <td class="ops">${r.ops.map((o) => `<button type="button" class="small" data-act="${esc(o.action)}"
-        data-tid="${esc(r.torrent_id)}" aria-label="${esc(o.text)}：${esc(r.name)}">${esc(o.text)}</button>`).join(" ")}</td></tr>`).join("");
-  if (s.assignments_truncated) html += empty(`还有 ${s.assignments_truncated} 条未列出`);
-  // 每 5 秒刷新一次状态：内容没变就不重画，免得键盘焦点被打断
-  const sig = f + "|" + view.page + "|" + html;
-  if (sig !== view.sig) { $("assignments").innerHTML = html; view.sig = sig; }
-  $("pager").hidden = pages <= 1;
-  $("pg-info").textContent = `第 ${view.page} / ${pages} 页（共 ${shown.length} 条）`;
-  $("pg-prev").disabled = view.page <= 1;
-  $("pg-next").disabled = view.page >= pages;
+const view = {only: null, open: new Set(), seedingOpen: false, q: "", page: 1, byId: new Map(), warning: "", now: 0};
+const SECTION_OF = {seeding: "seeding", downloading: "active", pending: "active", problem: "problem", removing: "removing"};
+
+function setList(el, html) {
+  // setHTML 的加强版：重画前记住焦点在哪个 data-fk 上，重画后把焦点放回同一个控件
+  if (el._html === html) return;
+  const active = document.activeElement;
+  const key = active && el.contains(active) ? active.dataset.fk : null;
+  el.innerHTML = html;
+  el._html = html;
+  if (key) { const again = el.querySelector(`[data-fk="${CSS.escape(key)}"]`); if (again) again.focus({preventScroll: true}); }
 }
-function rerender() { view.sig = ""; refresh(); }
-$("filters").addEventListener("click", (ev) => {
-  const b = ev.target.closest("button[data-filter]");
-  if (!b) return;
-  view.filter = b.dataset.filter; view.page = 1; view.fsig = ""; rerender();
-  setTimeout(() => { const n = $("filters").querySelector(`[data-filter="${view.filter}"]`); if (n) n.focus(); }, 300);
+const domId = (key) => String(key).replace(/[^A-Za-z0-9_-]/g, (c) => "_" + c.charCodeAt(0).toString(16));
+
+function siteText(v) {
+  if (!v.site) return "";
+  // 契约：observed_seeding 为真 = 最近的采样看到在做种；为假 = 还没采到（last_seeded_at 若有是更早的一次）
+  const ago = v.site.at ? relTime(v.site.at, view.now) : "";
+  if (v.site.confirmed) return `<span class="seen-ok">站点已确认 ✓</span>${ago ? " " + esc(ago) : ""}`;
+  return "等待取样 ⏳" + (ago ? `（上次确认 ${esc(ago)}）` : "");
+}
+const ICONS = {
+  warn: '<path d="M8 2.5 1.5 13.5h13z" /><path d="M8 6.5v3M8 11.5v.01" />',
+  down: '<path d="M8 2.5v8M4.5 7 8 10.5 11.5 7M3 13.5h10" />',
+  wait: '<circle cx="8" cy="8" r="5.5" /><path d="M8 5v3l2 1.5" />',
+  seed: '<path d="M8 13.5v-8M4.5 9 8 5.5 11.5 9M3 2.5h10" />',
+  drop: '<path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.5 9h6l.5-9" />',
+};
+const icon = (name) => `<span class="lvl2-icon${name === "warn" ? " is-warn" : ""}" aria-hidden="true"><svg class="ui-icon" viewBox="0 0 16 16">${ICONS[name]}</svg></span>`;
+function rowHTML(v, detail, kind) {
+  view.byId.set(v.torrent_id, v);
+  const badge = v.badge ? `<span class="status-badge">${esc(v.badge)}</span>` : "";
+  const note = v.note ? `<span class="asg-note">${esc(v.note)}</span>` : "";
+  const primary = v.primary ? `<button type="button" class="secondary btn-sm" data-act="${esc(v.primary.action)}" data-tid="${v.torrent_id}"
+      data-fk="act:${v.torrent_id}" aria-label="${esc(v.primary.text)}：${esc(v.name)}">${esc(v.primary.text)}</button>` : "";
+  const more = v.more.length ? `<button type="button" class="more-trigger" data-more="${v.torrent_id}" popovertarget="row-menu"
+      aria-haspopup="menu" data-fk="more:${v.torrent_id}" aria-label="更多操作：${esc(v.name)}"><svg class="ui-icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="3.5" cy="8" r="1.3" /><circle cx="8" cy="8" r="1.3" /><circle cx="12.5" cy="8" r="1.3" /></svg></button>` : "";
+  return `<li class="asg-row"><span class="asg-name">${kind ? icon(kind) : ""}${esc(v.name)}${badge}${note}</span><span class="asg-size">${esc(v.size_text)}</span>`
+    + `<span class="asg-detail">${detail}</span><span class="asg-dl">${esc(v.downloader || "")}</span><span class="asg-ops">${primary}${more}</span></li>`;
+}
+function progressHTML(v) {
+  const pct = Math.floor((v.progress || 0) * 100);
+  return `<span class="prog" role="progressbar" aria-label="下载进度：${esc(v.name)}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}"><span style="width:${pct}%"></span></span>`
+    + [pct + "%", v.speed_text, v.eta_text].filter(Boolean).map(esc).join(" · ");
+}
+function groupHTML(g, kind, label, detail, code) {
+  // 第二层的一行原因（或一类待加种）：图标 · 说法（原因码在旁边的 ⓘ 里）· 条数 · 体积 · 批量修复 · ▸ 展开成员
+  const key = `${kind}:${g.key}`, open = view.open.has(key), id = "grp-" + domId(key), tipId = "code-" + domId(key);
+  // 原因码只在 ⓘ 提示里（components/HintTip.vue），不当正文
+  const codeTip = code ? `<span class="hint-tip tip-anchor"><button type="button" class="hint-tip-trigger" aria-label="原因码" aria-describedby="${tipId}"
+      data-fk="code:${esc(key)}"><span aria-hidden="true">i</span></button><span id="${tipId}" role="tooltip" class="tip-bubble">原因码：${esc(code)}</span></span>` : "";
+  const fix = g.fix ? `<button type="button" class="btn-sm" data-bulk="${esc(g.fix.action)}" data-ids="${g.rows.map((v) => v.torrent_id).join(",")}"
+      data-fk="fix:${esc(key)}">${esc(g.fix.text)}</button>` : "";
+  return `<li class="cause"><div class="cause-head"><span class="cause-label">${icon(kind === "cause" ? "warn" : "wait")}${label}${codeTip}</span>`
+    + `<span class="cause-meta">${esc(g.meta_text)}</span>`
+    + `<span class="cause-tools">${fix}<button type="button" class="exp-btn" data-expand="${esc(key)}" aria-expanded="${open}" aria-controls="${id}"
+      data-fk="exp:${esc(key)}" aria-label="${open ? "收起" : "展开"}成员：${esc(g.label)}"><svg class="ui-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="m6 3 5 5-5 5" /></svg></button></span></div>`
+    + `<ul class="row-list" id="${id}"${open ? "" : " hidden"}>${open ? g.rows.map((v) => rowHTML(v, detail(v))).join("") : ""}</ul></li>`;
+}
+function setMeta(sec, s) {
+  // 第一层：区块标题只有条数小标；读屏读「N 个」
+  setList(sec.querySelector(".sec-count"), `<span aria-hidden="true">${s.count}</span><span class="sr-only">${s.count} 个</span>`);
+}
+
+function renderAssignments(s) {
+  const g = s.groups;
+  view.warning = s.takeover_warning; view.now = s.now; view.byId = new Map();
+  $("assign-total").textContent = g ? `${g.count} 条 · ${g.size_text}` : "";
+  const empty = !g ? (!s.last ? "还没有运行过" : (s.last.status === "ok" ? "下一轮运行后显示全部派单" : "还没有拿到派单"))
+    : (!g.count ? "站点暂时没有派单" : "");
+  $("assign-empty").hidden = !empty;
+  setText($("assign-empty"), empty);
+  const bar = g ? g.bar.filter((b) => b.count) : [];
+  if (view.only && !bar.some((b) => b.key === view.only)) view.only = null;
+  $("bar-wrap").hidden = !bar.length;
+  setList($("bar"), bar.map((b) => `<button type="button" class="seg seg--${b.key}" style="--grow:${Math.max(b.size, 1)}" data-bucket="${b.key}"
+      data-fk="seg:${b.key}" aria-pressed="${view.only === b.key}" aria-label="${esc(b.label)} ${b.count} 个 · ${esc(b.size_text)}${view.only === b.key ? "（再点一次看全部）" : "，只看这一组"}"></button>`).join(""));
+  setList($("bar-legend"), bar.map((b) => `<li><i class="seg--${b.key}"></i>${esc(b.label)} ${b.count} 个 · ${esc(b.size_text)}</li>`).join(""));
+
+  const secs = Object.fromEntries((g ? g.sections : []).map((x) => [x.key, x]));
+  const shows = (key) => !!secs[key] && (!view.only || SECTION_OF[view.only] === key);
+  // 需要处理：一行一个原因
+  $("sec-problem").hidden = !shows("problem");
+  if (secs.problem) {
+    setMeta($("sec-problem"), secs.problem);
+    setList($("causes"), secs.problem.causes.map((c) => groupHTML(c, "cause", esc(c.label), (v) => esc(v.status_text), c.code)).join(""));
+  }
+  // 进行中：下载中的行 + 待加种（按原因各一行）
+  $("sec-active").hidden = !shows("active");
+  if (secs.active) {
+    setMeta($("sec-active"), secs.active);
+    setList($("active-rows"), view.only === "pending" ? "" : secs.active.rows.map((v) => rowHTML(v, progressHTML(v), "down")).join(""));
+    setList($("pending-lines"), view.only === "downloading" ? "" : secs.active.pending.map((p) =>
+      groupHTML(p, "pending", `待加种 · ${esc(p.label)}`, () => "")).join(""));
+  }
+  // 做种中：默认收起；展开后可搜名字，50 条一页
+  $("sec-seeding").hidden = !shows("seeding");
+  if (secs.seeding) {
+    setMeta($("sec-seeding"), secs.seeding);
+    setText($("seeding-total"), `合计 ${secs.seeding.size_text}`);
+    const open = view.seedingOpen || view.only === "seeding";
+    $("seeding-toggle").setAttribute("aria-expanded", String(open));
+    $("seeding-body").hidden = !open;
+    const q = view.q.trim().toLowerCase();
+    const rows = secs.seeding.rows.filter((v) => !q || v.name.toLowerCase().includes(q));
+    const pages = Math.max(1, Math.ceil(rows.length / PAGE));
+    view.page = Math.min(Math.max(1, view.page), pages);
+    setList($("seeding-rows"), !open ? "" : (rows.length ? rows.slice((view.page - 1) * PAGE, view.page * PAGE)
+      .map((v) => rowHTML(v, siteText(v), "seed")).join("") : `<li class="empty-line">没有名字里带「${esc(view.q.trim())}」的种子</li>`));
+    renderPager(open ? pages : 1, rows.length);
+  }
+  // 即将删除：原因 · 接下来会怎样
+  $("sec-removing").hidden = !shows("removing");
+  if (secs.removing) {
+    setMeta($("sec-removing"), secs.removing);
+    setList($("removing-rows"), secs.removing.rows.map((v) => rowHTML(v, `${esc(v.release_text)} · ${esc(v.outcome_text)}`, "drop")).join(""));
+  }
+  $("assign-truncated").hidden = !s.assignments_truncated;
+  setText($("assign-truncated"), s.assignments_truncated ? `还有 ${s.assignments_truncated} 条未列出` : "");
+}
+
+function pagerPages(page, last) {
+  // components/AppPager.vue 的页码折叠：1 … 4 5 6 … 20；手机上只留首、当前、末页
+  const narrow = window.matchMedia("(max-width: 480px)").matches;
+  const wanted = new Set([1, last, page]);
+  if (!narrow) {
+    wanted.add(page - 1); wanted.add(page + 1);
+    if (page <= 3) [2, 3, 4].forEach((n) => wanted.add(n));
+    if (page >= last - 2) [last - 1, last - 2, last - 3].forEach((n) => wanted.add(n));
+  }
+  const list = [...wanted].filter((n) => n >= 1 && n <= last).sort((a, b) => a - b);
+  const out = [];
+  list.forEach((n, i) => { if (i && n - list[i - 1] > 1) out.push("gap"); out.push(n); });
+  return out;
+}
+function renderPager(pages, total) {
+  const p = view.page;
+  const html = pages <= 1 ? "" :
+    `<button type="button" class="pager-step pager-step--prev" data-page="${p - 1}" data-fk="pg:prev" ${p <= 1 ? "disabled" : ""}><svg class="ui-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3 5 8l5 5" /></svg><span>上一页</span></button>`
+    + `<ol class="pager-pages">${pagerPages(p, pages).map((n) => n === "gap" ? `<li><span class="pager-gap" aria-hidden="true">…</span></li>`
+      : `<li><button type="button" class="pager-page${n === p ? " current" : ""}" data-page="${n}" data-fk="pg:${n}" ${n === p ? 'aria-current="page"' : ""} aria-label="第 ${n} 页">${n}</button></li>`).join("")}</ol>`
+    + `<button type="button" class="pager-step pager-step--next" data-page="${p + 1}" data-fk="pg:next" ${p >= pages ? "disabled" : ""}><span>下一页</span><svg class="ui-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="m6 3 5 5-5 5" /></svg></button>`
+    + `<span class="pager-total">共 ${total} 个</span>`;
+  $("pager").hidden = pages <= 1;
+  setList($("pager"), html);
+}
+
+let lastStatus = null;
+function rerender() { if (lastStatus) renderAssignments(lastStatus); }
+function showOnly(key) {
+  view.only = view.only === key ? null : key;
+  view.page = 1;
+  rerender();
+}
+$("bar").addEventListener("click", (ev) => { const b = ev.target.closest("[data-bucket]"); if (b) showOnly(b.dataset.bucket); });
+$("s-problem-card").addEventListener("click", () => {
+  if (!lastStatus || !lastStatus.groups || !lastStatus.assign_stats.problem) return;
+  view.only = null; showOnly("problem");
+  $("sec-problem").scrollIntoView({block: "start", behavior: "smooth"});
+  const first = $("causes").querySelector("button");
+  if (first) first.focus({preventScroll: true});
 });
-$("pg-prev").onclick = () => { view.page -= 1; rerender(); };
-$("pg-next").onclick = () => { view.page += 1; rerender(); };
+$("seeding-toggle").addEventListener("click", () => {
+  view.seedingOpen = $("seeding-toggle").getAttribute("aria-expanded") !== "true";
+  if (!view.seedingOpen && view.only === "seeding") view.only = null;
+  rerender();
+});
+$("seeding-q").addEventListener("input", (ev) => { view.q = ev.target.value; view.page = 1; rerender(); });
+$("pager").addEventListener("click", (ev) => {
+  const b = ev.target.closest("button[data-page]");
+  if (!b || b.disabled) return;
+  view.page = Number(b.dataset.page); rerender();
+  const cur = $("pager").querySelector('[aria-current="page"]');
+  if (cur) cur.focus();
+});
 
 async function act(body) {
-  $("action-msg").textContent = "处理中…";
+  feedback($("action-msg"), "info", "处理中…");
   try {
     const r = await fetch("/api/action", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
     if (r.status === 401) { location.replace("/login"); return; }
     const j = await r.json().catch(() => ({}));
-    $("action-msg").textContent = j.message || ((j.error && j.error.code) ? "没有执行：" + j.error.code : "没有执行");
-  } catch (e) { $("action-msg").textContent = "连不上服务：" + e.message; }
-  setTimeout(rerender, 800);
+    feedback($("action-msg"), r.ok ? "success" : "warning", j.message || "没有执行");
+  } catch (e) { feedback($("action-msg"), "error", "连不上服务：" + e.message); }
+  setTimeout(refresh, 800);
 }
-$("assignments").addEventListener("click", (ev) => {
-  const b = ev.target.closest("button[data-act]");
+function takeOver(tid) {
+  const v = view.byId.get(tid);
+  askConfirm({title: "接管这颗种子？", name: v ? v.name : "#" + tid, text: view.warning, ok: "确认接管"})
+    .then((yes) => { if (yes) act({action: "takeover", torrent_id: tid, confirm: true}); });
+}
+// 区块里的按钮：行内主操作、批量修复、展开 / 收起
+$("sec-problem").parentElement.addEventListener("click", (ev) => {
+  const b = ev.target.closest("button");
   if (!b) return;
-  const tid = Number(b.dataset.tid);
-  if (b.dataset.act !== "takeover") { act({action: b.dataset.act, torrent_id: tid}); return; }
-  const row = (view.rows || []).find((r) => r.torrent_id === tid && r.ops.some((o) => o.action === "takeover"));
-  const dlg = $("confirm");
-  $("confirm-name").textContent = row ? row.name : "#" + tid;
-  $("confirm-text").textContent = view.warning;
-  dlg.returnValue = "";
-  dlg.onclose = () => { if (dlg.returnValue === "ok") act({action: "takeover", torrent_id: tid, confirm: true}); b.focus(); };
-  dlg.showModal();
-  $("confirm-ok").focus();
+  if (b.dataset.act) {
+    const tid = Number(b.dataset.tid);
+    if (b.dataset.act === "takeover") takeOver(tid); else act({action: b.dataset.act, torrent_id: tid});
+  } else if (b.dataset.bulk) {
+    act({action: b.dataset.bulk, torrent_ids: b.dataset.ids.split(",").map(Number)});
+  } else if (b.dataset.expand) {
+    const key = b.dataset.expand;
+    if (view.open.has(key)) view.open.delete(key); else view.open.add(key);
+    rerender();
+  }
 });
-$("retry-all").onclick = () => act({action: "retry"});
+// 「⋯」菜单：components/MoreMenu.vue —— 打开时放到触发按钮旁、焦点到第一项；点一项就关、焦点回到触发按钮
+let menuTrigger = null;
+document.addEventListener("click", (ev) => {
+  const t = ev.target.closest("[data-more]");
+  if (!t) return;
+  menuTrigger = t;
+  const v = view.byId.get(Number(t.dataset.more));
+  $("row-menu").innerHTML = (v ? v.more : []).map((m) => `<button type="button" class="more-item" role="menuitem" data-menu-act="${esc(m.action)}"
+      data-tid="${v.torrent_id}">${esc(m.text)}</button>`).join("");
+}, true);
+$("row-menu").addEventListener("toggle", (event) => {
+  const menu = event.currentTarget;
+  if (event.newState !== "open" || !menuTrigger) return;
+  const r = menuTrigger.getBoundingClientRect(), w = menu.offsetWidth, h = menu.offsetHeight;
+  const below = r.bottom + 4 + h <= window.innerHeight - 8;
+  menu.style.top = `${below ? r.bottom + 4 : Math.max(8, r.top - 4 - h)}px`;
+  menu.style.left = `${Math.min(Math.max(8, r.right - w), window.innerWidth - w - 8)}px`;
+  const first = menu.querySelector(".more-item:not(:disabled)");
+  if (first) first.focus();
+});
+$("row-menu").addEventListener("click", (event) => {
+  const item = event.target.closest("[data-menu-act]");
+  if (!item) return;
+  event.currentTarget.hidePopover();
+  const back = menuTrigger && menuTrigger.isConnected ? menuTrigger
+    : document.querySelector(`[data-more="${item.dataset.tid}"]`);
+  if (back) back.focus({preventScroll: true});
+  const tid = Number(item.dataset.tid);
+  if (item.dataset.menuAct === "takeover") takeOver(tid); else act({action: item.dataset.menuAct, torrent_id: tid});
+});
 
+// 确认对话框（ConfirmDialog.vue）：接管一颗种子、打开「自动接管」都用它；确认 → true，取消 / Esc → false
+let confirmResolve = null;
+function finishConfirm(ok) {
+  const done = confirmResolve;
+  confirmResolve = null;
+  dialogs.close($("confirm"));
+  if (done) done(ok);
+}
+function askConfirm({title, name = "", text, ok}) {
+  $("confirm-title").textContent = title;
+  $("confirm-name").textContent = name;
+  $("confirm-name").hidden = !name;
+  $("confirm-text").textContent = text;
+  $("confirm-ok").textContent = ok;
+  dialogs.open($("confirm"));
+  return new Promise((resolve) => { confirmResolve = resolve; });
+}
+dialogs.setup($("confirm"), () => finishConfirm(false));
+$("confirm-form").addEventListener("submit", (ev) => { ev.preventDefault(); finishConfirm(true); });
+
+// ---------------- 设置 ----------------
+const TEST_TEXT = {
+  auth_failed: ["error", "用户名或密码不对"],
+  unreachable: ["error", "连不上这个地址：检查地址、端口，以及容器能不能访问到它"],
+  list_failed: ["warning", "登录成功，但列种子失败"],
+  password_required: ["warning", "改了地址、类型或用户名：请先填密码再测"],
+};
+const FIELD_TEXT = {"downloaders.name": "名称（字母开头，只能有字母、数字、- 和 _）", "downloaders.type": "类型",
+                    "downloaders.url": "地址", downloaders: "下载器", site_url: "站点地址", save_path: "专用保存目录", tag: "专用标签"};
+function rowValues(row) {
+  return Object.fromEntries([...row.querySelectorAll("[data-k]")].map((el) => [el.dataset.k, el.value.trim()]));
+}
+async function testRow(row, btn) {
+  const out = row.querySelector("[data-result]");
+  btn.disabled = true;
+  feedback(out, "info", "测试中…");
+  try {
+    const r = await api("/api/downloaders/test", {method: "POST", body: JSON.stringify(rowValues(row))});
+    if (r.result === "ok") {
+      feedback(out, "success", `连接正常 · ${r.torrents} 个种子 · 剩余空间 ${r.free_text || "读不到"}`);
+    } else {
+      const [tone, text] = TEST_TEXT[r.result] || ["error", "测试失败"];
+      feedback(out, tone, text);
+    }
+  } catch (e) {
+    const err = (e.body && e.body.error) || {};
+    feedback(out, "error", err.field ? `填写有误：${FIELD_TEXT[err.field] || err.field}` : "测试失败：" + e.message);
+  } finally {
+    btn.disabled = false;
+  }
+}
+let dlSeq = 0;
 function dlRow(d = {}) {
   const node = $("dl-row").content.firstElementChild.cloneNode(true);
+  const n = ++dlSeq;
   for (const el of node.querySelectorAll("[data-k]")) {
     const k = el.dataset.k;
+    el.id = `dl-${n}-${k}`;
+    el.previousElementSibling.htmlFor = el.id;
     if (k === "password") el.placeholder = d.password_set ? "已保存（留空 = 不改）" : "";
     else if (d[k] != null) el.value = d[k];
   }
-  node.querySelector("[data-rm]").onclick = () => node.remove();
+  const name = () => node.querySelector('[data-k="name"]').value.trim() || `第 ${n} 台`;
+  const test = node.querySelector("[data-test]"), rm = node.querySelector("[data-rm]");
+  test.onclick = () => testRow(node, test);
+  rm.onclick = () => { markDirty("dl", true); const next = node.nextElementSibling || node.previousElementSibling; node.remove(); (next ? next.querySelector("input") : $("add-dl")).focus(); };
+  node.addEventListener("input", () => { test.setAttribute("aria-label", `测试连接：${name()}`); rm.setAttribute("aria-label", `删除下载器：${name()}`); });
+  test.setAttribute("aria-label", `测试连接：${name()}`);
+  rm.setAttribute("aria-label", `删除下载器：${name()}`);
   $("dls").appendChild(node);
+  return node;
 }
+// ---------------- 设置区块的展开 / 收起 ----------------
+// 同「做种中」的写法（标题里的按钮 + aria-expanded）。开关记在 localStorage：读写都包 try/catch，读不到就按默认收起。
+// 有没保存的修改或保存出错时一直展开（折起来就看不到没保存的东西了），撤销或保存成功后才能收起。
+const FOLD_KEY = "colaseedgroup.panel.open";
+const folds = {
+  cfg: {toggle: "cfg-toggle", body: "cfg-body", dirty: false, error: false},
+  dl: {toggle: "dl-toggle", body: "dl-body", dirty: false, error: false},
+  account: {toggle: "account-toggle", body: "account-body", dirty: false, error: false},
+};
+function loadFolds() {
+  try { return JSON.parse(localStorage.getItem(FOLD_KEY) || "{}") || {}; } catch (e) { return {}; }
+}
+function saveFolds() {
+  try { localStorage.setItem(FOLD_KEY, JSON.stringify(Object.fromEntries(Object.entries(folds).map(([k, f]) => [k, !!f.open])))); }
+  catch (e) { /* 存不了（隐私模式等）：只是下次打开时回到默认 */ }
+}
+function showFold(key) {
+  const f = folds[key], open = f.open || f.dirty || f.error;
+  $(f.toggle).setAttribute("aria-expanded", String(open));
+  $(f.body).hidden = !open;
+}
+function setFold(key, open, remember = true) {
+  folds[key].open = open;
+  if (remember) saveFolds();
+  showFold(key);
+}
+const stored = loadFolds();
+for (const key of Object.keys(folds)) {
+  folds[key].open = !!stored[key];
+  showFold(key);
+  $(folds[key].toggle).addEventListener("click", () => {
+    const f = folds[key];
+    if ((f.dirty || f.error) && !$(f.body).hidden) {
+      // 有没保存的修改：不收起，提醒先保存或撤销
+      const toast = key === "dl" ? $("dl-toast") : $("toast");
+      feedback(toast, "warning", "有没保存的修改：先保存或撤销，再收起。");
+      return;
+    }
+    setFold(key, $(f.toggle).getAttribute("aria-expanded") !== "true");
+  });
+}
+function markDirty(key, dirty) {
+  folds[key].dirty = dirty;
+  $(key === "dl" ? "dl-revert" : "cfg-revert").hidden = !dirty;
+  showFold(key);
+}
+$("cfg").addEventListener("input", () => markDirty("cfg", true));
+$("cfg").addEventListener("change", () => markDirty("cfg", true));
+$("dl-form").addEventListener("input", () => markDirty("dl", true));
+$("dl-form").addEventListener("change", () => markDirty("dl", true));
 
-function fillConfig(c) {
-  try { $("sg-link").href = new URL("/account/seed-group", c.site_url).href; } catch (e) { /* 地址不合法时保留默认 */ }
+let pwFromEnv = false;
+let savedConfig = null;
+function fillSettings(c) {
+  try {
+    const href = new URL("/account/seed-group", c.site_url).href;
+    for (const a of document.querySelectorAll(".site-link")) a.href = href;
+  } catch (e) { /* 地址不合法时保留默认 */ }
   for (const k of ["site_url", "save_path", "tag", "interval", "max_adds", "max_deletes"]) $(k).value = c[k];
   $("enabled").checked = !!c.enabled;
   $("delete_files").checked = !!c.delete_files;
+  $("auto_takeover").checked = !!c.auto_takeover;
   $("api_key").value = "";
   $("api_key").placeholder = c.api_key_set ? "已保存（留空 = 不改）" : "还没填";
   $("instance_id").textContent = c.instance_id;
-  if (c.password_from_env) {
-    for (const id of ["pw_current", "pw_new", "pw_confirm", "pw_save"]) $(id).disabled = true;
-    $("pw_hint").textContent = "密码由环境变量 COLASEEDGROUP_PASSWORD 设定，面板里不能改；要改就改环境变量并重建容器。";
-  }
+  setText($("cfg-summary"), `每 ${c.interval} 分钟 · 每轮加 ${c.max_adds} / 删 ${c.max_deletes} · 自动接管 ${c.auto_takeover ? "开" : "关"}`
+    + (c.enabled ? "" : " · 已停用") + (c.api_key_set ? "" : " · 还没填 API Key"));
+  markDirty("cfg", false);
+}
+function fillDownloaders(c) {
   $("dls").innerHTML = "";
-  (c.downloaders.length ? c.downloaders : [{}]).forEach(dlRow);
+  (c.downloaders.length ? c.downloaders : [{}]).forEach((d) => dlRow(d));
+  markDirty("dl", false);
+}
+function fillConfig(c) {
+  savedConfig = c;
+  fillSettings(c);
+  fillDownloaders(c);
+  pwFromEnv = !!c.password_from_env;
+  $("pw-open").disabled = pwFromEnv;
+  $("pw-env").hidden = !pwFromEnv;
+  setText($("account-summary"), pwFromEnv ? "密码由环境变量设定" : "面板登录密码");
+  // 还没配置好：缺 Key 就展开保种设置，缺下载器就展开下载器（只这一次，不记进 localStorage）
+  if (!c.api_key_set && !folds.cfg.open) setFold("cfg", true, false);
+  if (!c.downloaders.length && !folds.dl.open) setFold("dl", true, false);
+}
+function dlSummary(dls) {
+  // 下载器区块收起时的一行：每台上一轮连得上没有
+  if (!dls.length) return "还没配置";
+  return dls.map((d) => `${d.name} ${d.reachable === null ? "待同步" : (d.reachable ? "连得上" : "连不上")}`).join(" · ");
 }
 
 const NOTE = {api_key_cleared_site_changed: "站点地址变了，旧 API Key 已清除，请重新填写"};
+const noteText = (n) => NOTE[n] || (n.startsWith("password_cleared:") ? `下载器 ${n.split(":")[1]} 改了地址或用户名，密码已清除，请重填` : n);
+async function postConfig(key, body, button, toast, fill) {
+  button.disabled = true;
+  try {
+    const c = await api("/api/config", {method: "POST", body: JSON.stringify(body)});
+    savedConfig = c;
+    fill(c);
+    folds[key].error = false;
+    showFold(key);
+    const notes = (c.notes || []).map(noteText);
+    feedback(toast, notes.length ? "warning" : "success", "已保存，马上同步一次。" + notes.join("；"));
+    refresh();
+  } catch (e) {
+    const err = (e.body && e.body.error) || {};
+    folds[key].error = true;
+    showFold(key);
+    feedback(toast, "error", err.field ? `保存失败：${FIELD_TEXT[err.field] || err.field}不对` : "保存失败：" + (err.code || e.message));
+  } finally {
+    button.disabled = false;
+  }
+}
+// 保种设置只存自己的字段；下载器只存下载器。服务端合并时只动请求里有的键（merge_update），秘密规则不变：
+// 改站点地址不重填 Key → 旧 Key 清掉；改下载器地址 / 类型 / 用户名不重填密码 → 旧密码不沿用
 async function save(ev) {
   ev.preventDefault();
   const body = {
     site_url: $("site_url").value, save_path: $("save_path").value, tag: $("tag").value,
     interval: +$("interval").value, max_adds: +$("max_adds").value, max_deletes: +$("max_deletes").value,
-    enabled: $("enabled").checked, delete_files: $("delete_files").checked,
-    downloaders: [...$("dls").children].map((row) => Object.fromEntries(
-      [...row.querySelectorAll("[data-k]")].map((el) => [el.dataset.k, el.value.trim()])))
-      .filter((d) => d.name || d.url),
+    enabled: $("enabled").checked, delete_files: $("delete_files").checked, auto_takeover: $("auto_takeover").checked,
   };
   if ($("api_key").value.trim()) body.api_key = $("api_key").value.trim();
+  await postConfig("cfg", body, $("cfg-save"), $("toast"), fillSettings);
+}
+async function saveDownloaders(ev) {
+  ev.preventDefault();
+  const body = {downloaders: [...$("dls").children].map(rowValues).filter((d) => d.name || d.url)};
+  await postConfig("dl", body, $("dl-save"), $("dl-toast"), fillDownloaders);
+}
+$("cfg").addEventListener("submit", save);
+$("dl-form").addEventListener("submit", saveDownloaders);
+$("cfg-revert").onclick = () => { if (savedConfig) { folds.cfg.error = false; fillSettings(savedConfig); feedback($("toast"), "", ""); $("cfg-toggle").focus(); } };
+$("dl-revert").onclick = () => { if (savedConfig) { folds.dl.error = false; fillDownloaders(savedConfig); feedback($("dl-toast"), "", ""); $("dl-toggle").focus(); } };
+// 打开「自动接管」先确认一次（同接管的确认框）；取消就关回去
+$("auto_takeover").addEventListener("change", async (ev) => {
+  const sw = ev.currentTarget;
+  if (!sw.checked) return;
+  const yes = await askConfirm({title: "打开自动接管？", ok: "打开自动接管",
+    text: "开启后，下载器里已经在做种的同一颗种子会被自动接管；站点收回这条派单时，它会被删除（共用内容时只删种子）。保存设置后生效。"});
+  if (!yes) sw.checked = false;
+});
+$("add-dl").onclick = () => { markDirty("dl", true); dlRow().querySelector("input").focus(); };
+
+// ---------------- 账号：修改登录密码（对话框） ----------------
+const PW_ERR = {wrong_password: "当前密码不对", too_short: "新密码至少 8 位", too_long: "新密码太长", invalid: "请填写当前密码和新密码",
+                password_from_env: "密码由环境变量设定，不能在这里改", too_many_attempts: "错误次数太多，请稍后再试"};
+const pwDlg = $("pw-dialog");
+dialogs.setup(pwDlg, () => dialogs.close(pwDlg));
+$("pw-open").onclick = () => {
+  $("pw-form").reset();
+  feedback($("pw-error"), "", "");
+  dialogs.open(pwDlg);
+};
+$("pw-form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const cur = $("pw_current").value, nw = $("pw_new").value;
+  const fail = (text, focus) => { feedback($("pw-error"), "", text); if (focus) focus.focus(); };
+  if (!cur) return fail("请填写当前密码", $("pw_current"));
+  if (nw.length < 8) return fail("新密码至少 8 位", $("pw_new"));
+  if (nw !== $("pw_confirm").value) return fail("两次输入的新密码不一样", $("pw_confirm"));
+  feedback($("pw-error"), "", "");
+  dialogs.busy(pwDlg, true);
   try {
-    const c = await api("/api/config", {method: "POST", body: JSON.stringify(body)});
-    fillConfig(c);
-    const notes = (c.notes || []).map((n) => NOTE[n] || (n.startsWith("password_cleared:") ? `下载器 ${n.split(":")[1]} 改了地址或用户名，密码已清除，请重填` : n));
-    $("toast").textContent = "已保存，马上同步一次。" + notes.join("；");
-    refresh();
+    await api("/api/password", {method: "POST", body: JSON.stringify({current: cur, new: nw})});
+    dialogs.busy(pwDlg, false);
+    $("pw-form").reset();
+    dialogs.close(pwDlg);
+    feedback($("pw-result"), "success", "密码已修改，其它浏览器的登录已退出。");
   } catch (e) {
+    dialogs.busy(pwDlg, false);
     const err = (e.body && e.body.error) || {};
-    $("toast").textContent = `保存失败：${err.field || ""} ${err.code || e.message}`;
+    const wait = err.code === "too_many_attempts" && err.retry_after ? `（${err.retry_after} 秒后再试）` : "";
+    fail((PW_ERR[err.code] || "修改失败：" + (err.code || e.message)) + wait, err.code === "wrong_password" ? $("pw_current") : null);
+  }
+});
+
+// ---------------- 刷新 ----------------
+async function refresh() {
+  try {
+    const s = await api("/api/status");
+    lastStatus = s;
+    renderHeader(s);
+    renderStats(s);
+    renderAssignments(s);
+  } catch (e) {
+    $("headline").className = "notice-bar notice-bar--error";
+    $("hl-time-wrap").hidden = true;
+    setText($("hl-text"), "面板连不上服务：" + e.message);
   }
 }
-
-async function refresh() {
-  try { renderStatus(await api("/api/status")); } catch (e) { $("headline").textContent = "面板连不上服务：" + e.message; }
-}
-
 $("run").onclick = async () => {
   $("run").disabled = true;
   try { await api("/api/run", {method: "POST", body: "{}"}); } finally { setTimeout(refresh, 800); }
 };
-$("add-dl").onclick = () => dlRow();
-$("logout").onclick = async () => {
-  await fetch("/api/logout", {method: "POST", headers: {"Content-Type": "application/json"}, body: "{}"}).catch(() => {});
-  location.replace("/login");
-};
-const PW_ERR = {wrong_password: "当前密码不对", too_short: "新密码至少 8 位", too_long: "新密码太长",
-                password_from_env: "密码由环境变量设定，不能在这里改", too_many_attempts: "错误次数太多，请稍后再试"};
-$("pw").addEventListener("submit", async (ev) => {
-  ev.preventDefault();
-  if ($("pw_new").value !== $("pw_confirm").value) { $("pw_toast").textContent = "两次输入的新密码不一样"; return; }
-  try {
-    await api("/api/password", {method: "POST", body: JSON.stringify({current: $("pw_current").value, new: $("pw_new").value})});
-    $("pw").reset();
-    $("pw_toast").textContent = "密码已修改，其它浏览器的登录已退出。";
-  } catch (e) {
-    const err = (e.body && e.body.error) || {};
-    $("pw_toast").textContent = "修改失败：" + (PW_ERR[err.code] || err.code || e.message);
-  }
-});
-$("cfg").addEventListener("submit", save);
+for (const b of document.querySelectorAll("[data-logout]")) {
+  b.onclick = async () => {
+    await fetch("/api/logout", {method: "POST", headers: {"Content-Type": "application/json"}, body: "{}"}).catch(() => {});
+    location.replace("/login");
+  };
+}
 api("/api/config").then(fillConfig);
 refresh();
 setInterval(refresh, 5000);

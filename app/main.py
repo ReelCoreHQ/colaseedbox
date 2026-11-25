@@ -1,6 +1,6 @@
 """可乐保种组 Docker 版（colaseedgroup-docker）：不需要 MoviePilot 的独立服务。
 
-执行器逻辑与 MoviePilot 插件 0.7.0 是同一份（app/seedgroup/，逐字节搬来）；
+执行器逻辑与 MoviePilot 插件是同一份（版本见 app/seedgroup/VENDOR.json）（app/seedgroup/，逐字节搬来）；
 这里是外壳：配置、定时运行、端口 3006 上的小面板（要登录，见 auth.py）。
 """
 
@@ -10,10 +10,12 @@ import os
 import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 
+from . import downloaders as downloaders_mod
 from . import view
 from .auth import MAX_PASSWORD, SESSION_TTL, Auth, PasswordError
 from .config import ConfigError, Store, merge_update, missing_fields, public_view
@@ -41,7 +43,7 @@ except ValueError as err:
 
 COOKIE = "colaseedgroup_session"
 # 不登录也能访问的路径；其余全部要会话（新加的接口默认受保护）
-PUBLIC_PATHS = {"/api/health", "/api/login", "/api/logout", "/login"}
+PUBLIC_PATHS = {"/api/health", "/api/login", "/api/logout", "/login", "/panel.css"}
 
 
 @asynccontextmanager
@@ -142,6 +144,13 @@ def index() -> FileResponse:
     return _page("index.html")
 
 
+@app.get("/panel.css")
+def panel_css() -> FileResponse:
+    """面板与登录页共用的样式（登录页也要用，所以不要会话）。"""
+    return FileResponse(BASE / "templates" / "panel.css", media_type="text/css; charset=utf-8",
+                        headers={"Cache-Control": "no-cache"})
+
+
 @app.get("/login")
 def login_page(request: Request) -> Response:
     if auth.valid(request.cookies.get(COOKIE)):
@@ -236,22 +245,54 @@ async def set_config(request: Request):
     return {**_config_view(cfg), "notes": notes}
 
 
-ACTIONS = ("retry", "resume", "takeover")
+@app.post("/api/downloaders/test")
+async def test_downloader(request: Request):
+    """设置里每台下载器的「测试连接」：{name, type, url, username, password}，用填的值登录并列一次种子、
+    读剩余空间，只读。密码留空 = 用已保存的（同名且地址、类型、用户名都没改时，规则同保存配置）。
+    回结果码与数字，从不回地址、用户名、密码，日志里也不写。"""
+    body = await _json_body(request)
+    row = {k: body.get(k) for k in ("name", "type", "url", "username", "password")}
+    if not str(row.get("name") or "").strip():
+        row["name"] = "probe"
+    try:
+        merged, notes = merge_update(store.load(), {"downloaders": [row]})
+    except ConfigError as err:
+        return JSONResponse({"error": {"code": err.code, "field": err.field}}, status_code=422)
+    if any(n.startswith("password_cleared:") for n in notes):
+        # 改了地址 / 类型 / 用户名：已保存的密码不跟过去（防止把密码发到别的地址）
+        return {"result": "password_required"}
+    result = await asyncio.to_thread(downloaders_mod.probe, merged["downloaders"][0], merged["save_path"])
+    log.info("测试下载器连接：%s", result["result"])
+    free = result.get("free_bytes")
+    return {**result, "free_text": view.human_size(free) if free is not None else ""}
+
+
+ACTIONS = ("retry", "resume", "recheck", "takeover")
+MAX_BULK = 2000
+
+
+def _is_id(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
 
 
 @app.post("/api/action")
 async def manual_action(request: Request):
-    """面板上的手动操作：{action: retry|resume|takeover, torrent_id}。retry 不带 torrent_id = 全部重试；
-    takeover 必须带 confirm: true（面板先弹确认框）。"""
+    """面板上的手动操作：{action: retry|resume|recheck|takeover, torrent_id}。retry 不带 torrent_id = 全部重试；
+    「需要处理」一行原因的批量修复带 torrent_ids（retry / resume / recheck）；
+    takeover 必须带 confirm: true（面板先弹确认框）。recheck 与 resume 是同一个操作（出错的就重新校验）。"""
     body = await _json_body(request)
-    action, tid = body.get("action"), body.get("torrent_id")
-    if action not in ACTIONS or (tid is not None and (isinstance(tid, bool) or not isinstance(tid, int))):
+    action, tid, ids = body.get("action"), body.get("torrent_id"), body.get("torrent_ids")
+    if action not in ACTIONS or (tid is not None and not _is_id(tid)):
         return JSONResponse({"error": {"code": "invalid"}}, status_code=422)
-    if action != "retry" and tid is None:
+    if ids is not None and (action == "takeover" or tid is not None or not isinstance(ids, list) or not ids
+                            or len(ids) > MAX_BULK or not all(_is_id(x) for x in ids)):
+        return JSONResponse({"error": {"code": "invalid"}}, status_code=422)
+    if action != "retry" and tid is None and ids is None:
         return JSONResponse({"error": {"code": "invalid"}}, status_code=422)
     if action == "takeover" and body.get("confirm") is not True:
         return JSONResponse({"error": {"code": "not_confirmed"}}, status_code=422)
-    result = await asyncio.to_thread(runner.act, action, tid)
+    action = "resume" if action == "recheck" else action
+    result = await asyncio.to_thread(runner.act, action, tid, ids)
     return JSONResponse(result, status_code=200 if result.get("ok") else 409)
 
 

@@ -12,8 +12,9 @@
 import base64
 import json
 import logging
+import posixpath
 import time
-from typing import Any, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlsplit
 
 import qbittorrentapi
@@ -27,6 +28,9 @@ log = logging.getLogger("colaseedgroup")
 CONNECT_TIMEOUT = 5
 READ_TIMEOUT = 60
 ADD_VISIBLE_WAIT = 5
+
+#: 连接失败的分类（测试连接用）：auth = 用户名或密码不对（含 qB 因失败太多封 IP 的 403），unreachable = 其它
+AUTH, UNREACHABLE = "auth", "unreachable"
 
 # 库自己的日志可能带地址：只放行 ERROR 以上，且我们从不打开它们的调试输出
 for _name in ("qbittorrentapi", "transmission-rpc", "urllib3"):
@@ -42,6 +46,7 @@ class QbInstance:
         self._username = username
         self._password = password
         self.qbc: Optional[qbittorrentapi.Client] = None
+        self.error = ""
         self.reconnect()
 
     def __repr__(self) -> str:
@@ -58,10 +63,26 @@ class QbInstance:
                 DISABLE_LOGGING_DEBUG_OUTPUT=True,
             )
             client.auth_log_in()
-            self.qbc = client
+            self.qbc, self.error = client, ""
         except Exception as err:
             self.qbc = None
+            auth = isinstance(err, (qbittorrentapi.LoginFailed, qbittorrentapi.Unauthorized401Error,
+                                    qbittorrentapi.Forbidden403Error))
+            self.error = AUTH if auth else UNREACHABLE
             log.warning("下载器 %s（qBittorrent）连接失败：%s", self.name, type(err).__name__)
+
+    def free_space(self, _path: str) -> Optional[int]:
+        """剩余磁盘空间（字节），只读：sync/maindata 的 server_state.free_space_on_disk（qB 只报默认保存目录
+        所在的盘）。读不到返回 None。"""
+        if not self.qbc:
+            return None
+        try:
+            state = (self.qbc.sync_maindata() or {}).get("server_state") or {}
+            value = state.get("free_space_on_disk")
+        except Exception as err:
+            log.warning("下载器 %s 读剩余空间失败：%s", self.name, type(err).__name__)
+            return None
+        return int(value) if isinstance(value, (int, float)) and not isinstance(value, bool) and value >= 0 else None
 
     def get_torrents(self) -> Tuple[List[Any], bool]:
         if not self.qbc:
@@ -158,7 +179,7 @@ def _parse_add(ret: Any) -> Tuple[bool, List[str]]:
 
 #: clients.TrDownloader 读的字段
 TR_FIELDS = ["id", "hashString", "name", "status", "error", "labels", "downloadDir", "percentDone",
-             "totalSize", "uploadedEver"]
+             "totalSize", "uploadedEver", "rateDownload", "eta"]
 
 
 class TrInstance:
@@ -174,6 +195,7 @@ class TrInstance:
         self._username = username
         self._password = password
         self.trc: Optional[transmission_rpc.Client] = None
+        self.error = ""
         self.reconnect()
 
     def __repr__(self) -> str:
@@ -186,9 +208,32 @@ class TrInstance:
                 username=self._username or None, password=self._password or None,
                 timeout=(CONNECT_TIMEOUT, READ_TIMEOUT),
             )
+            self.error = ""
         except Exception as err:
             self.trc = None
+            self.error = AUTH if isinstance(err, transmission_rpc.TransmissionAuthError) else UNREACHABLE
             log.warning("下载器 %s（Transmission）连接失败：%s", self.name, type(err).__name__)
+
+    def free_space(self, path: str) -> Optional[int]:
+        """剩余磁盘空间（字节），只读：Transmission 的 free-space RPC。专用目录还没建出来时
+        （还没加过种）往上找最近的一层父目录，最多三层。读不到返回 None。"""
+        if not self.trc:
+            return None
+        path = path or "/"
+        for _ in range(4):
+            try:
+                value = self.trc.free_space(path)
+            except Exception as err:
+                log.debug("下载器 %s 读剩余空间失败：%s", self.name, type(err).__name__)
+                value = None
+            if isinstance(value, int) and value >= 0:
+                return value
+            parent = posixpath.dirname(path.rstrip("/")) or "/"
+            if parent == path:
+                break
+            path = parent
+        log.warning("下载器 %s 读不到剩余空间", self.name)
+        return None
 
     def get_torrents(self) -> Tuple[List[Any], bool]:
         if not self.trc:
@@ -257,6 +302,40 @@ class TrInstance:
         if not tags:
             return False
         return self._call("打标签", "change_torrent", ids, labels=sorted(set((org_tags or []) + list(tags))))
+
+
+def _instance(dl: Any) -> Any:
+    """执行器的 Downloader 包着的直连实例（插件原文 clients.wrap 把它存在 ``_mp``）。"""
+    return getattr(dl, "_mp", None)
+
+
+def capture(downloaders: List[Any], save_path: str, errors: List[str]) -> List[Dict[str, Any]]:
+    """一轮结束后每台下载器的只读快照（给面板的「下载器」卡）：连得上没有、剩余空间。
+    每轮只读一次；只放名字、类型、是否连得上、剩余字节数，不放地址与用户名。"""
+    failed = {str(e).split(":", 1)[0] for e in errors or []}
+    out = []
+    for dl in downloaders:
+        inst = _instance(dl)
+        client = getattr(inst, "qbc", None) or getattr(inst, "trc", None)
+        reachable = client is not None and dl.name not in failed
+        free = None
+        if client is not None and hasattr(inst, "free_space"):
+            free = inst.free_space(save_path)
+        out.append({"name": dl.name, "type": getattr(dl, "type", ""), "reachable": reachable, "free_bytes": free})
+    return out
+
+
+def probe(conf: Dict[str, Any], save_path: str) -> Dict[str, Any]:
+    """测试连接：按给的配置登录一次、列一次种子、读一次剩余空间，只读。
+    回结果码与数字，从不回地址、用户名、密码，也不写进日志。"""
+    cls = QbInstance if conf["type"] == "qbittorrent" else TrInstance
+    inst = cls(conf["name"], conf["url"], conf.get("username", ""), conf.get("password", ""))
+    if getattr(inst, "qbc", None) is None and getattr(inst, "trc", None) is None:
+        return {"result": "auth_failed" if inst.error == AUTH else "unreachable"}
+    torrents, failed = inst.get_torrents()
+    if failed:
+        return {"result": "list_failed"}
+    return {"result": "ok", "torrents": len(torrents), "free_bytes": inst.free_space(save_path)}
 
 
 def build(downloaders: List[dict]) -> List[Any]:

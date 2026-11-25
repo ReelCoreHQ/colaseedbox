@@ -112,6 +112,8 @@ class FakeQbc:
         self.adding_polls = 0
         self.async_add = False
         self.fail_list = False
+        self.free = 3 * 1024 ** 4
+        self.fail_maindata = False
 
     def torrents_info(self, torrent_hashes=None):
         if self.fail_list:
@@ -161,6 +163,11 @@ class FakeQbc:
 
     def transfer_speed_limits_mode(self):
         return 0
+
+    def sync_maindata(self):
+        if self.fail_maindata:
+            raise ConnectionError(f"http://{LAN}:8080 refused (password={QB_PASS})")
+        return {"server_state": {"free_space_on_disk": self.free}, "torrents": {}}
 
 
 def fake_qb(name="qb1"):

@@ -1,27 +1,16 @@
 """面板数据：把上一轮结果与账本整理成页面要显示的东西（文案、体积换算、错误码说明）。
 
-与插件页（plugins.v3/colaseedgroup/__init__.py 的 get_page）同口径：上次运行结果、派单条数、
-本服务管理的种子与体积、本轮新加/删除、申报空间，以及**全部派单**的表（种子名 | 体积 | 站点要求 |
-本地情况 | 下载器）。派单表的行、顺序、文案都来自搬来的执行器（``seedgroup.engine``），与插件页逐字一致；
-不显示 info_hash。体积一律自动换算单位。
+与插件页（plugins.v3/colaseedgroup/__init__.py 的 get_page）同口径：上次运行结果、派单条数与体积、
+本服务管理的种子与体积、异常条数、各下载器连得上没有与剩余空间，以及**全部派单**（状态条 + 需要处理 / 进行中 /
+做种中 / 即将删除 四个区块）。分组、顺序、文案都来自搬来的执行器（``seedgroup.engine.group_assignments``），
+与插件页一致；不显示 info_hash。体积一律自动换算单位。
 错误只按固定原因码 / 站点的 ``code`` 显示，从不显示站点 ``message`` 或异常原文。
 """
 
 import time
-from collections import Counter
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
-from .seedgroup.engine import (
-    FILTERS,
-    ROW_ACTION_TEXT,
-    action_text,
-    default_filter,
-    local_text,
-    row_actions,
-    row_filter,
-    summary_text,
-    takeover_warning,
-)
+from .seedgroup.engine import bucket, group_assignments, human_size, takeover_warning
 
 STATUS_TEXT = {
     "ok": "正常",
@@ -90,31 +79,14 @@ SKIP_TEXT = {
     "downloader_not_selected": "记录的下载器已不在配置里",
     "delete_cap": "达到每轮删除上限，下轮再删",
     "add_cap": "达到每轮加种上限，下轮再加",
+    "takeover_cap": "达到每轮自动接管上限，下轮再接",
+    "takeover_failed": "自动接管时打专用标签失败",
     "remove_failed": "删除失败",
     "remove_blocked": "删种闸门关闭",
     "backoff": "加种失败退避中",
     "add_failed": "加种失败",
     "no_download_url": "派单没有下载链接",
 }
-
-_UNITS = ("B", "KiB", "MiB", "GiB", "TiB", "PiB")
-
-
-def human_size(num: Any) -> str:
-    """字节数自动换算单位（与插件页同一规则）。"""
-    try:
-        value = float(num)
-    except (TypeError, ValueError):
-        return "-"
-    value = max(0.0, value)
-    unit = 0
-    while value >= 1024 and unit < len(_UNITS) - 1:
-        value /= 1024
-        unit += 1
-    if unit == 0:
-        return f"{int(value)} B"
-    return f"{value:.1f} {_UNITS[unit]}" if value < 100 else f"{value:.0f} {_UNITS[unit]}"
-
 
 def explain(code: str) -> Dict[str, str]:
     """'http_403:api_key_scope_denied' → {code, text}；只查表，不信任任何自由文本。"""
@@ -133,26 +105,6 @@ def _clock(ts: float) -> str:
     return time.strftime("%m-%d %H:%M", time.localtime(ts)) if ts else "-"
 
 
-def assignments(last: Dict[str, Any]) -> Optional[List[Dict[str, Any]]]:
-    """派单表的行（已按执行器的顺序排好）。只给显示要用的字段与可做的操作（按 torrent_id）：
-    没有 info_hash、没有链接。"""
-    rows = last.get("assignments")
-    if rows is None:
-        return None
-    return [{
-        "torrent_id": r.get("torrent_id"),
-        "name": str(r.get("name") or ""),
-        "size_text": human_size(r.get("size") or 0),
-        "action": r.get("action") or "",
-        "action_text": action_text(r),
-        "local": r.get("local") or "",
-        "local_text": local_text(r, _clock),
-        "downloader": r.get("downloader") or "",
-        "filter": row_filter(r),
-        "ops": [{"action": "resume" if a == "recheck" else a, "text": ROW_ACTION_TEXT[a]} for a in row_actions(r)],
-    } for r in rows]
-
-
 def _errors(last: Dict[str, Any]) -> List[Dict[str, str]]:
     out = []
     if last.get("status") not in (None, "ok") and last.get("reason") and last.get("status") != "outdated":
@@ -163,7 +115,47 @@ def _errors(last: Dict[str, Any]) -> List[Dict[str, str]]:
         name, _, code = str(item).partition(":")
         out.append({"where": f"下载器 {name}", **explain(code)})
     if last.get("delete_block") and last.get("status") == "ok":
-        out.append({"where": "删种闸门", **explain(last["delete_block"])})
+        out.append({"where": "本轮不删种", **explain(last["delete_block"])})
+    return out
+
+
+#: 还要占盘的派单：待加种、加种失败退避中（站点收回的不算）
+_TO_ADD = ("pending", "backoff")
+
+
+def _assign_stats(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+    # 条数与体积算全部派单（含站点收回的），与「全部派单」标题一致；收回的另在 removing 里
+    kept = [r for r in rows if r.get("action") != "remove"]
+    size = sum(int(r.get("size") or 0) for r in rows)
+    pending = sum(int(r.get("size") or 0) for r in kept if r.get("local") in _TO_ADD)
+    return {
+        "count": len(rows),
+        "size_text": human_size(size),
+        "removing": len(rows) - len(kept),
+        "problem": sum(1 for r in rows if bucket(r) == "problem"),
+        "pending_count": sum(1 for r in kept if r.get("local") in _TO_ADD),
+        "pending_bytes": pending,
+        "pending_text": human_size(pending),
+    }
+
+
+def downloader_cards(cfg: Dict[str, Any], last: Dict[str, Any], pending_bytes: int) -> List[Dict[str, Any]]:
+    """「下载器」卡：每台所选下载器连得上没有、剩余空间（上一轮读的）。剩余空间少于还要加的体积就提醒。
+    配置里有、上一轮还没读过的下载器 reachable 为 None（面板显示「下一轮后显示」）。"""
+    seen = {d.get("name"): d for d in last.get("downloaders") or [] if isinstance(d, dict)}
+    out = []
+    for conf in cfg.get("downloaders") or []:
+        got = seen.get(conf["name"])
+        free = got.get("free_bytes") if got else None
+        free = free if isinstance(free, int) and not isinstance(free, bool) else None
+        out.append({
+            "name": conf["name"],
+            "type": conf["type"],
+            "reachable": bool(got.get("reachable")) if got else None,
+            "free_bytes": free,
+            "free_text": human_size(free) if free is not None else "",
+            "low": free is not None and free < pending_bytes,
+        })
     return out
 
 
@@ -171,7 +163,6 @@ def status(cfg: Dict[str, Any], state: Dict[str, Any], last: Dict[str, Any], *, 
            running: bool, next_run_at: Any, missing: List[str]) -> Dict[str, Any]:
     owned = state.get("owned") or {}
     total = sum(int(rec.get("size") or 0) for rec in owned.values())
-    skipped = Counter(str(v).split(":", 1)[0] for v in (last.get("skipped") or {}).values())
     stat = last.get("status")
     summary = None
     if last:
@@ -182,18 +173,19 @@ def status(cfg: Dict[str, Any], state: Dict[str, Any], last: Dict[str, Any], *, 
             "finished_at": last.get("finished_at") or last.get("started_at"),
             "revision": last.get("revision"),
             "items": last.get("items"),
-            "action_counts": last.get("action_counts") or {},
             "capacity_gib": last.get("capacity_gib"),
-            "capacity_text": human_size(int(last["capacity_gib"]) * 1024 ** 3) if last.get("capacity_gib") else "-",
+            "capacity_text": human_size(int(last["capacity_gib"]) * 1024 ** 3) if last.get("capacity_gib") else "",
             "added": len(last.get("added") or []),
+            "taken_over": len(last.get("taken_over") or []),
             "removed": len(last.get("removed") or []),
-            "skipped": [{"code": k, "count": n, "text": SKIP_TEXT.get(k, k)} for k, n in sorted(skipped.items())],
             "deletes_allowed": bool(last.get("deletes_allowed")),
             "state_reported": bool(last.get("state_reported")),
             "min_plugin_version": last.get("min_plugin_version") or "",
             "outdated": stat == "outdated",
             "errors": _errors(last),
         }
+    rows = last.get("assignments") or []
+    stats = _assign_stats(rows)
     return {
         "version": version,
         "now": time.time(),
@@ -203,11 +195,11 @@ def status(cfg: Dict[str, Any], state: Dict[str, Any], last: Dict[str, Any], *, 
         "configured": not missing,
         "missing": [{"code": m, "text": REASON_TEXT.get(m, m)} for m in missing],
         "last": summary,
-        "assignments": assignments(last),
-        "filters": [{"key": k, "text": t} for k, t in FILTERS],
-        "default_filter": default_filter(last.get("assignments") or []),
+        # 全部派单：状态条 + 区块（执行器 group_assignments，与插件页同一份分组）；老 last_run 没有快照时为 None
+        "groups": group_assignments(rows, _clock) if last.get("assignments") is not None else None,
+        "assign_stats": stats,
+        "downloaders": downloader_cards(cfg, last, stats["pending_bytes"]),
         "takeover_warning": takeover_warning(bool(cfg.get("delete_files", True))),
-        "assignment_summary_text": summary_text(last.get("assignment_summary") or {}),
         "assignments_truncated": int(last.get("assignments_truncated") or 0),
         "owned_count": len(owned),
         "owned_total": total,
