@@ -302,7 +302,8 @@ class Box(unittest.TestCase):
         for text in ("需要处理", "进行中", "做种中", "即将删除", 'role="progressbar"', 'popovertarget="row-menu"',
                      "/account/seed-group", "站点上的我的保种组 ↗", "const PAGE = 50", "showModal", "/api/action",
                      "aria-pressed", "aria-expanded", "torrent_ids", "/api/downloaders/test", 'role="switch"',
-                     "trapFocus", "修改登录密码"):
+                     "trapFocus", "修改登录密码", "localStorage", 'id="dl-form"', 'id="cfg-toggle"',
+                     'aria-controls="dl-body"', "保存下载器"):
             self.assertIn(text, html)
         for gone in ("info_hash", "本轮跳过", "删种闸门：开", "assignment_summary_text", ">站点要求<", "<table"):
             self.assertNotIn(gone, html)
