@@ -46,7 +46,7 @@ class Runner:
     def running(self) -> bool:
         return self._lock.locked()
 
-    def act(self, action: str, torrent_id: Any = None) -> Dict[str, Any]:
+    def act(self, action: str, torrent_id: Any = None, torrent_ids: Optional[List[Any]] = None) -> Dict[str, Any]:
         """面板上的手动操作（retry / resume / takeover）。与同步共用一把锁：同步进行中不动账本。
         规则全在搬来的 ``Actions`` 里（复核、只动所选下载器、幂等）；成功后马上同步一次。"""
         cfg = self.store.load()
@@ -59,7 +59,9 @@ class Runner:
                               Settings(save_path=cfg["save_path"], tag=cfg["tag"], delete_files=cfg["delete_files"]),
                               self.store.load_state(), self.store.save_state, log=log)
             rows = self.store.load_last_run().get("assignments") or []
-            if action == "retry":
+            if torrent_ids is not None:
+                result = actions.bulk(rows, action, torrent_ids)
+            elif action == "retry":
                 result = actions.retry(rows, torrent_id)
             elif action == "resume":
                 result = actions.resume(rows, torrent_id)
@@ -67,7 +69,7 @@ class Runner:
                 result = actions.take_over(rows, torrent_id)
         finally:
             self._lock.release()
-        if result.get("code") in ("retried", "retried_all", "resumed", "rechecking", "taken_over"):
+        if result.get("code") in ("retried", "retried_all", "resumed", "rechecking", "taken_over", "bulk_done"):
             self.wake()
             result = {**result, "message": result["message"] + "；马上同步一次"}
         elif not result.get("ok"):

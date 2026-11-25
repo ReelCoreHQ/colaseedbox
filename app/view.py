@@ -1,25 +1,16 @@
 """面板数据：把上一轮结果与账本整理成页面要显示的东西（文案、体积换算、错误码说明）。
 
 与插件页（plugins.v3/colaseedgroup/__init__.py 的 get_page）同口径：上次运行结果、派单条数与体积、
-本服务管理的种子与体积、异常条数、各下载器连得上没有与剩余空间，以及**全部派单**的表（种子名 | 体积 | 站点要求 |
-本地情况 | 下载器）。派单表的行、顺序、文案都来自搬来的执行器（``seedgroup.engine``），与插件页逐字一致；
-不显示 info_hash。体积一律自动换算单位。
+本服务管理的种子与体积、异常条数、各下载器连得上没有与剩余空间，以及**全部派单**（状态条 + 需要处理 / 进行中 /
+做种中 / 即将删除 四个区块）。分组、顺序、文案都来自搬来的执行器（``seedgroup.engine.group_assignments``），
+与插件页一致；不显示 info_hash。体积一律自动换算单位。
 错误只按固定原因码 / 站点的 ``code`` 显示，从不显示站点 ``message`` 或异常原文。
 """
 
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
-from .seedgroup.engine import (
-    FILTERS,
-    ROW_ACTION_TEXT,
-    action_text,
-    default_filter,
-    local_text,
-    row_actions,
-    row_filter,
-    takeover_warning,
-)
+from .seedgroup.engine import bucket, group_assignments, human_size, takeover_warning
 
 STATUS_TEXT = {
     "ok": "正常",
@@ -97,25 +88,6 @@ SKIP_TEXT = {
     "no_download_url": "派单没有下载链接",
 }
 
-_UNITS = ("B", "KiB", "MiB", "GiB", "TiB", "PiB")
-
-
-def human_size(num: Any) -> str:
-    """字节数自动换算单位（与插件页同一规则）。"""
-    try:
-        value = float(num)
-    except (TypeError, ValueError):
-        return "-"
-    value = max(0.0, value)
-    unit = 0
-    while value >= 1024 and unit < len(_UNITS) - 1:
-        value /= 1024
-        unit += 1
-    if unit == 0:
-        return f"{int(value)} B"
-    return f"{value:.1f} {_UNITS[unit]}" if value < 100 else f"{value:.0f} {_UNITS[unit]}"
-
-
 def explain(code: str) -> Dict[str, str]:
     """'http_403:api_key_scope_denied' → {code, text}；只查表，不信任任何自由文本。"""
     code = str(code or "")
@@ -131,26 +103,6 @@ def explain(code: str) -> Dict[str, str]:
 
 def _clock(ts: float) -> str:
     return time.strftime("%m-%d %H:%M", time.localtime(ts)) if ts else "-"
-
-
-def assignments(last: Dict[str, Any]) -> Optional[List[Dict[str, Any]]]:
-    """派单表的行（已按执行器的顺序排好）。只给显示要用的字段与可做的操作（按 torrent_id）：
-    没有 info_hash、没有链接。"""
-    rows = last.get("assignments")
-    if rows is None:
-        return None
-    return [{
-        "torrent_id": r.get("torrent_id"),
-        "name": str(r.get("name") or ""),
-        "size_text": human_size(r.get("size") or 0),
-        "action": r.get("action") or "",
-        "action_text": action_text(r),
-        "local": r.get("local") or "",
-        "local_text": local_text(r, _clock),
-        "downloader": r.get("downloader") or "",
-        "filter": row_filter(r),
-        "ops": [{"action": "resume" if a == "recheck" else a, "text": ROW_ACTION_TEXT[a]} for a in row_actions(r)],
-    } for r in rows]
 
 
 def _errors(last: Dict[str, Any]) -> List[Dict[str, str]]:
@@ -179,7 +131,7 @@ def _assign_stats(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
         "count": len(kept),
         "size_text": human_size(size),
         "removing": len(rows) - len(kept),
-        "problem": sum(1 for r in rows if row_filter(r) == "problem"),
+        "problem": sum(1 for r in rows if bucket(r) == "problem"),
         "pending_count": sum(1 for r in kept if r.get("local") in _TO_ADD),
         "pending_bytes": pending,
         "pending_text": human_size(pending),
@@ -242,11 +194,10 @@ def status(cfg: Dict[str, Any], state: Dict[str, Any], last: Dict[str, Any], *, 
         "configured": not missing,
         "missing": [{"code": m, "text": REASON_TEXT.get(m, m)} for m in missing],
         "last": summary,
-        "assignments": assignments(last),
+        # 全部派单：状态条 + 区块（执行器 group_assignments，与插件页同一份分组）；老 last_run 没有快照时为 None
+        "groups": group_assignments(rows, _clock) if last.get("assignments") is not None else None,
         "assign_stats": stats,
         "downloaders": downloader_cards(cfg, last, stats["pending_bytes"]),
-        "filters": [{"key": k, "text": t} for k, t in FILTERS],
-        "default_filter": default_filter(rows),
         "takeover_warning": takeover_warning(bool(cfg.get("delete_files", True))),
         "assignments_truncated": int(last.get("assignments_truncated") or 0),
         "owned_count": len(owned),

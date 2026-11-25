@@ -36,31 +36,63 @@
   .issue-list { display: grid; gap: var(--space-6); margin: 0; padding: 0; list-style: none; font-size: var(--text-md); }
   .issue-where { color: var(--text-muted); }
   #action-msg { margin-block: var(--space-12); }
-  /* 派单表 */
-  .assign td.name { min-width: 14em; overflow-wrap: anywhere; word-break: break-word; }
-  .assign td.size { white-space: nowrap; }
-  .assign td.local { min-width: 8em; }
-  .assign td.ops { white-space: nowrap; }
-  .assign td.ops button + button { margin-inline-start: var(--space-6); }
-  .assign td.empty-cell { color: var(--text-muted); text-align: center; padding-block: var(--space-24); }
-  /* 手机：每条派单一张卡片——第一行种子名与体积，第二行站点要求 · 本地情况 · 下载器，第三行操作 */
+  /* 全部派单：状态条 + 区块 */
+  .asg-total { color: var(--text-muted); font-size: var(--text-md); font-weight: var(--weight-regular); }
+  .status-bar { display: flex; gap: 2px; height: 28px; margin: var(--space-4) 0 var(--space-8); }
+  .status-bar .seg { flex: var(--grow) 1 0; min-width: 12px; min-height: 0; padding: 0; border: 0; border-radius: var(--radius-sm); background: var(--seg); cursor: pointer; }
+  .status-bar .seg[aria-pressed="true"] { outline: 2px solid var(--text); outline-offset: 2px; }
+  .status-bar .seg:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+  .status-bar:has(.seg[aria-pressed="true"]) .seg[aria-pressed="false"] { opacity: .35; }
+  .seg--seeding { --seg: var(--text); }
+  .seg--downloading { --seg: var(--text-muted); }
+  .seg--pending { --seg: var(--control-border); }
+  .seg--problem { --seg: var(--error); }
+  .seg--removing { --seg: var(--border); }
+  .bar-legend { display: flex; flex-wrap: wrap; gap: var(--space-4) var(--space-16); margin: 0 0 var(--space-8); padding: 0; list-style: none; color: var(--text-muted); font-size: var(--text-sm); }
+  .bar-legend li { display: inline-flex; align-items: center; gap: var(--space-6); }
+  .bar-legend i { width: 10px; height: 10px; border-radius: 2px; background: var(--seg); }
+  .bar-clear { margin-inline-start: auto; }
+  .asg { margin-top: var(--space-24); }
+  .asg-title { display: flex; align-items: baseline; flex-wrap: wrap; gap: var(--space-8); margin: 0 0 var(--space-8); font-size: var(--text-base); }
+  .asg-meta { color: var(--text-muted); font-size: var(--text-sm); font-weight: var(--weight-regular); }
+  .asg-toggle { gap: var(--space-8); min-height: var(--control-sm); padding: 0; border: 0; background: none; color: var(--text); font: inherit; font-weight: var(--weight-semibold); }
+  .asg-toggle:hover { text-decoration: none; }
+  .asg-toggle .ui-icon { transition: rotate var(--duration-fast) var(--ease-out); }
+  .asg-toggle[aria-expanded="true"] .ui-icon { rotate: 90deg; }
+  .row-list, .cause-list { margin: 0; padding: 0; list-style: none; }
+  .asg-row { display: grid; grid-template-columns: minmax(0, 1fr) 5.5em minmax(9em, 17em) 5em 8.5em; align-items: center; gap: var(--space-4) var(--space-12); padding: var(--space-8) var(--space-4); border-bottom: 1px solid var(--line); font-size: var(--text-sm); }
+  .asg-row:last-child { border-bottom: 0; }
+  .asg-name { min-width: 0; overflow-wrap: anywhere; word-break: break-word; }
+  .asg-name .status-badge { margin-inline-start: var(--space-6); --tone: var(--text-muted); }
+  .asg-note { margin-inline-start: var(--space-6); color: var(--text-muted); font-size: var(--text-xs); }
+  .asg-size { text-align: end; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .asg-detail { min-width: 0; color: var(--text-muted); overflow-wrap: anywhere; }
+  .asg-dl { color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .asg-ops { display: flex; align-items: center; justify-content: flex-end; gap: var(--space-4); }
+  .seen-ok { color: var(--success); }
+  .prog { display: block; height: 6px; margin-bottom: var(--space-4); border-radius: var(--radius-pill); background: var(--surface-muted); overflow: hidden; }
+  .prog > span { display: block; height: 100%; background: var(--text-muted); }
+  .cause { padding: var(--space-8) 0; border-bottom: 1px solid var(--line); }
+  .cause:last-child { border-bottom: 0; }
+  .cause-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-6) var(--space-12); }
+  .cause-label { font-weight: var(--weight-semibold); }
+  .cause-meta { color: var(--text-muted); font-size: var(--text-sm); font-variant-numeric: tabular-nums; }
+  .cause-tools { display: flex; gap: var(--space-8); margin-inline-start: auto; }
+  .cause .row-list { margin: var(--space-8) 0 0 var(--space-12); padding-inline-start: var(--space-12); border-inline-start: 2px solid var(--line); }
+  .seeding-search { max-width: 22rem; margin-bottom: var(--space-8); }
+  .seeding-search input { width: 100%; }
+  .empty-line { margin: 0; padding: var(--space-12) 0; color: var(--text-muted); }
+  /* 手机：区块自然往下排，每条派单一张卡片——第一行名字与体积，第二行情况，第三行下载器与操作 */
   @media (max-width: 640px) {
-    .assign-wrap { overflow: visible; }
-    .assign thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-    .assign, .assign tbody { display: block; }
-    .assign tbody tr { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-4) var(--space-8); padding: var(--space-12) var(--space-4); border-bottom: 1px solid var(--line); }
-    .assign td { display: block; padding: 0; border: 0; }
-    .assign td.name { order: 1; flex: 1 1 0; min-width: 0; font-weight: var(--weight-semibold); }
-    .assign td.size { order: 2; flex: none; color: var(--text-muted); }
-    .assign tbody tr::before { content: ""; order: 3; flex-basis: 100%; height: 0; }
-    .assign td.act, .assign td.local, .assign td.dl { order: 4; min-width: 0; color: var(--text-muted); font-size: var(--text-xs); }
-    .assign td.local::before, .assign td.dl::before { content: "· "; }
-    .assign td.dl.is-empty { display: none; }
-    .assign tbody tr::after { content: ""; order: 5; flex-basis: 100%; height: 0; }
-    .assign td.ops { order: 6; display: flex; flex-wrap: wrap; gap: var(--space-6); }
-    .assign td.ops:empty { display: none; }
-    .assign td.ops button + button { margin: 0; }
-    .assign td.empty-cell { flex-basis: 100%; }
+    .asg-row { display: flex; flex-wrap: wrap; align-items: center; padding: var(--space-12) var(--space-4); }
+    .asg-name { flex: 1 1 calc(100% - 7em); font-weight: var(--weight-semibold); }   /* 名字与体积占满第一行，下载器总在下一行 */
+    .asg-size { flex: none; color: var(--text-muted); }
+    .asg-detail { flex: 1 1 100%; }
+    .asg-detail:empty { display: none; }
+    .asg-dl { flex: 1 1 50%; }
+    .asg-ops { flex: none; }
+    .cause-tools { margin-inline-start: 0; }
+    .cause .row-list { margin-inline-start: 0; }
   }
   /* 设置 */
   .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-16) var(--space-16); }
@@ -150,23 +182,45 @@
   <section class="panel" aria-labelledby="assign-title">
     <div class="section-head">
       <div class="hint-heading">
-        <h2 id="assign-title">全部派单</h2>
-        <!-- 表头说明：components/HintTip.vue -->
-        <span class="hint-tip tip-anchor"><button type="button" class="hint-tip-trigger" aria-label="派单表说明" aria-describedby="assign-hint"><span aria-hidden="true">i</span></button><span id="assign-hint" role="tooltip" class="tip-bubble"><span class="tip-p">这里只是下载器这一侧的情况；tracker 有没有把它算作做种，以站点上的保种组页面为准。</span><span class="tip-p">只有「插件管理」的种子（本服务加的或你确认接管的、带专用标签）会在站点收回派单时被删除；下载器里已有的同一颗种子、你自己的种子、别站的种子都不会被碰。</span></span></span>
+        <h2 id="assign-title">全部派单 <span class="asg-total" id="assign-total"></span></h2>
+        <!-- 说明：components/HintTip.vue -->
+        <span class="hint-tip tip-anchor"><button type="button" class="hint-tip-trigger" aria-label="全部派单说明" aria-describedby="assign-hint"><span aria-hidden="true">i</span></button><span id="assign-hint" role="tooltip" class="tip-bubble"><span class="tip-p">这里只是下载器这一侧的情况；tracker 有没有把它算作做种，以站点上的保种组页面为准。</span><span class="tip-p">只有「插件管理」的种子（本服务加的或你确认接管的、带专用标签）会在站点收回派单时被删除；下载器里已有的同一颗种子、你自己的种子、别站的种子都不会被碰。</span><span class="tip-p">状态条按体积画，点一段只看那一组，再点一次看全部。</span></span></span>
       </div>
-      <button type="button" class="secondary btn-sm" id="retry-all" hidden title="清掉所有加种失败的退避，马上同步一次">全部重试加种</button>
     </div>
-    <div class="choice-group" role="group" aria-label="筛选派单" id="filters"></div>
+    <div id="bar-wrap" hidden>
+      <!-- 按体积的状态条：每段一个按钮（aria-pressed），点了只看那一组；图例只是给眼睛看的，读屏读按钮 -->
+      <div class="status-bar" role="group" aria-label="按状态只看一组" id="bar"></div>
+      <ul class="bar-legend" id="bar-legend" aria-hidden="true"></ul>
+    </div>
     <p id="action-msg" class="action-feedback action-feedback--info" role="status" aria-live="polite"></p>
-    <div class="table-scroll assign-wrap">
-      <table class="data-table assign">
-        <thead><tr><th scope="col">种子名</th><th scope="col" class="numeric">体积</th><th scope="col">站点要求</th><th scope="col">本地情况</th><th scope="col">下载器</th><th scope="col">操作</th></tr></thead>
-        <tbody id="assignments"><tr><td colspan="6" class="empty-cell">加载中…</td></tr></tbody>
-      </table>
-    </div>
-    <!-- 翻页：components/AppPager.vue -->
-    <nav class="app-pager" aria-label="派单分页" id="pager" hidden></nav>
+    <p id="assign-empty" class="empty-line" hidden></p>
+
+    <section class="asg" id="sec-problem" aria-labelledby="sec-problem-title" hidden>
+      <h3 class="asg-title" id="sec-problem-title">需要处理 <span class="asg-meta"></span></h3>
+      <ul class="cause-list" id="causes"></ul>
+    </section>
+    <section class="asg" id="sec-active" aria-labelledby="sec-active-title" hidden>
+      <h3 class="asg-title" id="sec-active-title">进行中 <span class="asg-meta"></span></h3>
+      <ul class="row-list" id="active-rows"></ul>
+      <ul class="cause-list" id="pending-lines"></ul>
+    </section>
+    <section class="asg" id="sec-seeding" aria-labelledby="seeding-toggle" hidden>
+      <h3 class="asg-title"><button type="button" class="asg-toggle" id="seeding-toggle" aria-expanded="false" aria-controls="seeding-body"><svg class="ui-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="m6 3 5 5-5 5" /></svg>做种中 <span class="asg-meta"></span></button></h3>
+      <div id="seeding-body" hidden>
+        <div class="seeding-search"><label for="seeding-q" class="sr-only">按名字搜索做种中的种子</label><input id="seeding-q" type="search" placeholder="按名字搜索" autocomplete="off"></div>
+        <ul class="row-list" id="seeding-rows"></ul>
+        <!-- 翻页：components/AppPager.vue -->
+        <nav class="app-pager" aria-label="做种中分页" id="pager" hidden></nav>
+      </div>
+    </section>
+    <section class="asg" id="sec-removing" aria-labelledby="sec-removing-title" hidden>
+      <h3 class="asg-title" id="sec-removing-title">即将删除 <span class="asg-meta"></span></h3>
+      <ul class="row-list" id="removing-rows"></ul>
+    </section>
+    <p id="assign-truncated" class="empty-line" hidden></p>
   </section>
+  <!-- 行上的「⋯」菜单：components/MoreMenu.vue（原生 popover，全部行共用一个） -->
+  <div id="row-menu" popover class="more-popover" role="menu"></div>
 
   <section class="panel" aria-labelledby="cfg-title">
     <div class="section-head">
@@ -513,7 +567,7 @@ function renderHeader(s) {
 }
 
 function renderStats(s) {
-  const st = s.assign_stats, has = !!s.assignments;
+  const st = s.assign_stats, has = !!s.groups;
   setText($("s-assign"), has ? `${st.count} 条` : "-");
   setText($("s-assign-sub"), has ? st.size_text + (st.removing ? ` · 收回中 ${st.removing}` : "") : "下一轮同步后显示");
   setText($("s-owned"), `${s.owned_count} 个`);
@@ -542,10 +596,116 @@ function renderStats(s) {
   setHTML($("issues"), errs.map((e) => `<li><span class="issue-where">${esc(e.where)}：</span>${inlineTip(e.text, "原因码 " + e.code)}</li>`).join(""));
 }
 
-// ---------------- 派单表：筛选 + 分页 + 操作 ----------------
-// 行、顺序、文案、筛选与可做的操作都由执行器给出（与 MoviePilot 插件页一致），这里只排版
+// ---------------- 全部派单：状态条 + 区块 ----------------
+// 分组、顺序、文案、可做的操作都由执行器给出（engine.group_assignments，与 MoviePilot 插件页同一份），这里只排版。
+// 每 5 秒刷新：内容没变就不重画；要重画时，焦点按 data-fk 找回同一个控件；展开了哪些、搜什么、第几页都记在 view 里。
 const PAGE = 50;
-const view = {filter: null, page: 1, rows: null, warning: ""};
+const view = {only: null, open: new Set(), seedingOpen: false, q: "", page: 1, byId: new Map(), warning: "", now: 0};
+const SECTION_OF = {seeding: "seeding", downloading: "active", pending: "active", problem: "problem", removing: "removing"};
+
+function setList(el, html) {
+  // setHTML 的加强版：重画前记住焦点在哪个 data-fk 上，重画后把焦点放回同一个控件
+  if (el._html === html) return;
+  const active = document.activeElement;
+  const key = active && el.contains(active) ? active.dataset.fk : null;
+  el.innerHTML = html;
+  el._html = html;
+  if (key) { const again = el.querySelector(`[data-fk="${CSS.escape(key)}"]`); if (again) again.focus({preventScroll: true}); }
+}
+const domId = (key) => String(key).replace(/[^A-Za-z0-9_-]/g, (c) => "_" + c.charCodeAt(0).toString(16));
+
+function siteText(v) {
+  if (!v.site) return "";
+  // 契约：observed_seeding 为真 = 最近的采样看到在做种；为假 = 还没采到（last_seeded_at 若有是更早的一次）
+  const ago = v.site.at ? relTime(v.site.at, view.now) : "";
+  if (v.site.confirmed) return `<span class="seen-ok">站点已确认 ✓</span>${ago ? " " + esc(ago) : ""}`;
+  return "等待取样 ⏳" + (ago ? `（上次确认 ${esc(ago)}）` : "");
+}
+function rowHTML(v, detail) {
+  view.byId.set(v.torrent_id, v);
+  const badge = v.badge ? `<span class="status-badge">${esc(v.badge)}</span>` : "";
+  const note = v.note ? `<span class="asg-note">${esc(v.note)}</span>` : "";
+  const primary = v.primary ? `<button type="button" class="secondary btn-sm" data-act="${esc(v.primary.action)}" data-tid="${v.torrent_id}"
+      data-fk="act:${v.torrent_id}" aria-label="${esc(v.primary.text)}：${esc(v.name)}">${esc(v.primary.text)}</button>` : "";
+  const more = v.more.length ? `<button type="button" class="more-trigger" data-more="${v.torrent_id}" popovertarget="row-menu"
+      aria-haspopup="menu" data-fk="more:${v.torrent_id}" aria-label="更多操作：${esc(v.name)}"><svg class="ui-icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="3.5" cy="8" r="1.3" /><circle cx="8" cy="8" r="1.3" /><circle cx="12.5" cy="8" r="1.3" /></svg></button>` : "";
+  return `<li class="asg-row"><span class="asg-name">${esc(v.name)}${badge}${note}</span><span class="asg-size">${esc(v.size_text)}</span>`
+    + `<span class="asg-detail">${detail}</span><span class="asg-dl">${esc(v.downloader || "")}</span><span class="asg-ops">${primary}${more}</span></li>`;
+}
+function progressHTML(v) {
+  const pct = Math.floor((v.progress || 0) * 100);
+  return `<span class="prog" role="progressbar" aria-label="下载进度：${esc(v.name)}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}"><span style="width:${pct}%"></span></span>`
+    + [pct + "%", v.speed_text, v.eta_text].filter(Boolean).map(esc).join(" · ");
+}
+function groupHTML(g, kind, label, detail) {
+  // 一行原因（或一类待加种）：说法 · 条数 · 体积 · 批量修复 · 展开成员
+  const key = `${kind}:${g.key}`, open = view.open.has(key), id = "grp-" + domId(key);
+  const fix = g.fix ? `<button type="button" class="btn-sm" data-bulk="${esc(g.fix.action)}" data-ids="${g.rows.map((v) => v.torrent_id).join(",")}"
+      data-fk="fix:${esc(key)}">${esc(g.fix.text)}</button>` : "";
+  return `<li class="cause"><div class="cause-head"><span class="cause-label">${label}</span><span class="cause-meta">${g.count} 个 · ${esc(g.size_text)}</span>`
+    + `<span class="cause-tools">${fix}<button type="button" class="text-btn" data-expand="${esc(key)}" aria-expanded="${open}" aria-controls="${id}"
+      data-fk="exp:${esc(key)}">${open ? "收起" : "展开"}</button></span></div>`
+    + `<ul class="row-list" id="${id}"${open ? "" : " hidden"}>${open ? g.rows.map((v) => rowHTML(v, detail(v))).join("") : ""}</ul></li>`;
+}
+function setMeta(sec, s) { setText(sec.querySelector(".asg-meta"), `${s.count} 个 · ${s.size_text}`); }
+
+function renderAssignments(s) {
+  const g = s.groups;
+  view.warning = s.takeover_warning; view.now = s.now; view.byId = new Map();
+  $("assign-total").textContent = g ? `${g.count} 条 · ${g.size_text}` : "";
+  const empty = !g ? (!s.last ? "还没有运行过" : (s.last.status === "ok" ? "下一轮运行后显示全部派单" : "还没有拿到派单"))
+    : (!g.count ? "站点暂时没有派单" : "");
+  $("assign-empty").hidden = !empty;
+  setText($("assign-empty"), empty);
+  const bar = g ? g.bar.filter((b) => b.count) : [];
+  if (view.only && !bar.some((b) => b.key === view.only)) view.only = null;
+  $("bar-wrap").hidden = !bar.length;
+  setList($("bar"), bar.map((b) => `<button type="button" class="seg seg--${b.key}" style="--grow:${Math.max(b.size, 1)}" data-bucket="${b.key}"
+      data-fk="seg:${b.key}" aria-pressed="${view.only === b.key}" aria-label="${esc(b.label)} ${b.count} 个 · ${esc(b.size_text)}${view.only === b.key ? "（再点一次看全部）" : "，只看这一组"}"></button>`).join(""));
+  setList($("bar-legend"), bar.map((b) => `<li><i class="seg--${b.key}"></i>${esc(b.label)} ${b.count} 个 · ${esc(b.size_text)}</li>`).join(""));
+
+  const secs = Object.fromEntries((g ? g.sections : []).map((x) => [x.key, x]));
+  const shows = (key) => !!secs[key] && (!view.only || SECTION_OF[view.only] === key);
+  // 需要处理：一行一个原因
+  $("sec-problem").hidden = !shows("problem");
+  if (secs.problem) {
+    setMeta($("sec-problem"), secs.problem);
+    setList($("causes"), secs.problem.causes.map((c) => groupHTML(c, "cause", inlineTip(c.label, "原因码 " + (c.code || "—")),
+      (v) => esc(v.status_text))).join(""));
+  }
+  // 进行中：下载中的行 + 待加种（按原因各一行）
+  $("sec-active").hidden = !shows("active");
+  if (secs.active) {
+    setMeta($("sec-active"), secs.active);
+    setList($("active-rows"), view.only === "pending" ? "" : secs.active.rows.map((v) => rowHTML(v, progressHTML(v))).join(""));
+    setList($("pending-lines"), view.only === "downloading" ? "" : secs.active.pending.map((p) =>
+      groupHTML(p, "pending", `待加种 · ${esc(p.label)}`, () => "")).join(""));
+  }
+  // 做种中：默认收起；展开后可搜名字，50 条一页
+  $("sec-seeding").hidden = !shows("seeding");
+  if (secs.seeding) {
+    setMeta($("sec-seeding"), secs.seeding);
+    const open = view.seedingOpen || view.only === "seeding";
+    $("seeding-toggle").setAttribute("aria-expanded", String(open));
+    $("seeding-body").hidden = !open;
+    const q = view.q.trim().toLowerCase();
+    const rows = secs.seeding.rows.filter((v) => !q || v.name.toLowerCase().includes(q));
+    const pages = Math.max(1, Math.ceil(rows.length / PAGE));
+    view.page = Math.min(Math.max(1, view.page), pages);
+    setList($("seeding-rows"), !open ? "" : (rows.length ? rows.slice((view.page - 1) * PAGE, view.page * PAGE)
+      .map((v) => rowHTML(v, siteText(v))).join("") : `<li class="empty-line">没有名字里带「${esc(view.q.trim())}」的种子</li>`));
+    renderPager(open ? pages : 1, rows.length);
+  }
+  // 即将删除：原因 · 接下来会怎样
+  $("sec-removing").hidden = !shows("removing");
+  if (secs.removing) {
+    setMeta($("sec-removing"), secs.removing);
+    setList($("removing-rows"), secs.removing.rows.map((v) => rowHTML(v, `${esc(v.release_text)} · ${esc(v.outcome_text)}`)).join(""));
+  }
+  $("assign-truncated").hidden = !s.assignments_truncated;
+  setText($("assign-truncated"), s.assignments_truncated ? `还有 ${s.assignments_truncated} 条未列出` : "");
+}
+
 function pagerPages(page, last) {
   // components/AppPager.vue 的页码折叠：1 … 4 5 6 … 20；手机上只留首、当前、末页
   const narrow = window.matchMedia("(max-width: 480px)").matches;
@@ -563,61 +723,36 @@ function pagerPages(page, last) {
 function renderPager(pages, total) {
   const p = view.page;
   const html = pages <= 1 ? "" :
-    `<button type="button" class="pager-step pager-step--prev" data-page="${p - 1}" ${p <= 1 ? "disabled" : ""}><svg class="ui-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3 5 8l5 5" /></svg><span>上一页</span></button>`
+    `<button type="button" class="pager-step pager-step--prev" data-page="${p - 1}" data-fk="pg:prev" ${p <= 1 ? "disabled" : ""}><svg class="ui-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3 5 8l5 5" /></svg><span>上一页</span></button>`
     + `<ol class="pager-pages">${pagerPages(p, pages).map((n) => n === "gap" ? `<li><span class="pager-gap" aria-hidden="true">…</span></li>`
-      : `<li><button type="button" class="pager-page${n === p ? " current" : ""}" data-page="${n}" ${n === p ? 'aria-current="page"' : ""} aria-label="第 ${n} 页">${n}</button></li>`).join("")}</ol>`
-    + `<button type="button" class="pager-step pager-step--next" data-page="${p + 1}" ${p >= pages ? "disabled" : ""}><span>下一页</span><svg class="ui-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="m6 3 5 5-5 5" /></svg></button>`
-    + `<span class="pager-total">共 ${total} 条</span>`;
+      : `<li><button type="button" class="pager-page${n === p ? " current" : ""}" data-page="${n}" data-fk="pg:${n}" ${n === p ? 'aria-current="page"' : ""} aria-label="第 ${n} 页">${n}</button></li>`).join("")}</ol>`
+    + `<button type="button" class="pager-step pager-step--next" data-page="${p + 1}" data-fk="pg:next" ${p >= pages ? "disabled" : ""}><span>下一页</span><svg class="ui-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="m6 3 5 5-5 5" /></svg></button>`
+    + `<span class="pager-total">共 ${total} 个</span>`;
   $("pager").hidden = pages <= 1;
-  setHTML($("pager"), html);
+  setList($("pager"), html);
 }
-function renderAssignments(s) {
-  const rows = s.assignments;
-  view.rows = rows; view.warning = s.takeover_warning;
-  $("retry-all").hidden = !(rows || []).some((r) => r.ops.some((o) => o.action === "retry"));
-  if (view.filter === null && rows) view.filter = s.default_filter;
-  const counts = {all: (rows || []).length, problem: 0, pending: 0};
-  for (const r of rows || []) if (r.filter) counts[r.filter] += 1;
-  const f = view.filter || "all";
-  // 筛选：按钮形态的 choice-box + aria-pressed（src/styles/main.css；TorrentEditor.vue 的视角切换同写法）
-  setHTML($("filters"), rows ? s.filters.map((x) => `<button type="button" class="choice-box${x.key === f ? " active" : ""}" data-filter="${esc(x.key)}"
-      aria-pressed="${x.key === f}">${esc(x.text)}<span class="count">${counts[x.key]}</span></button>`).join("") : "");
-  const shown = (rows || []).filter((r) => f === "all" || r.filter === f);
-  const pages = Math.max(1, Math.ceil(shown.length / PAGE));
-  view.page = Math.min(Math.max(1, view.page), pages);
-  const slice = shown.slice((view.page - 1) * PAGE, view.page * PAGE);
-  const empty = (t) => `<tr><td colspan="6" class="empty-cell">${esc(t)}</td></tr>`;
-  const EMPTY = {problem: "没有异常的派单", pending: "没有待加种的派单", all: "站点暂时没有派单"};
-  let html;
-  if (!rows) html = empty(!s.last ? "还没有运行过" : (s.last.status === "ok" ? "下一轮运行后显示全部派单" : "还没有拿到派单"));
-  else if (!slice.length) html = empty(EMPTY[f]);
-  else html = slice.map((r) => `<tr>
-      <td class="name">${esc(r.name)}</td><td class="numeric size">${esc(r.size_text)}</td>
-      <td class="act">${esc(r.action_text)}</td><td class="local">${esc(r.local_text)}</td>
-      <td class="dl${r.downloader ? "" : " is-empty"}">${esc(r.downloader || "—")}</td>
-      <td class="ops">${r.ops.map((o) => `<button type="button" class="secondary btn-sm" data-act="${esc(o.action)}"
-        data-tid="${esc(r.torrent_id)}" aria-label="${esc(o.text)}：${esc(r.name)}">${esc(o.text)}</button>`).join("")}</td></tr>`).join("");
-  if (s.assignments_truncated) html += empty(`还有 ${s.assignments_truncated} 条未列出`);
-  // 每 5 秒刷新一次状态：内容没变就不重画，免得键盘焦点被打断
-  setHTML($("assignments"), html);
-  renderPager(pages, shown.length);
-}
+
 let lastStatus = null;
 function rerender() { if (lastStatus) renderAssignments(lastStatus); }
-function selectFilter(key) {
-  view.filter = key; view.page = 1; rerender();
-  const n = $("filters").querySelector(`[data-filter="${key}"]`);
-  if (n) n.focus();
+function showOnly(key) {
+  view.only = view.only === key ? null : key;
+  view.page = 1;
+  rerender();
 }
-$("filters").addEventListener("click", (ev) => {
-  const b = ev.target.closest("button[data-filter]");
-  if (b) selectFilter(b.dataset.filter);
-});
+$("bar").addEventListener("click", (ev) => { const b = ev.target.closest("[data-bucket]"); if (b) showOnly(b.dataset.bucket); });
 $("s-problem-card").addEventListener("click", () => {
-  if (!lastStatus || !lastStatus.assignments) return;
-  selectFilter("problem");
-  $("filters").scrollIntoView({block: "start", behavior: "smooth"});
+  if (!lastStatus || !lastStatus.groups || !lastStatus.assign_stats.problem) return;
+  view.only = null; showOnly("problem");
+  $("sec-problem").scrollIntoView({block: "start", behavior: "smooth"});
+  const first = $("causes").querySelector("button");
+  if (first) first.focus({preventScroll: true});
 });
+$("seeding-toggle").addEventListener("click", () => {
+  view.seedingOpen = $("seeding-toggle").getAttribute("aria-expanded") !== "true";
+  if (!view.seedingOpen && view.only === "seeding") view.only = null;
+  rerender();
+});
+$("seeding-q").addEventListener("input", (ev) => { view.q = ev.target.value; view.page = 1; rerender(); });
 $("pager").addEventListener("click", (ev) => {
   const b = ev.target.closest("button[data-page]");
   if (!b || b.disabled) return;
@@ -636,6 +771,56 @@ async function act(body) {
   } catch (e) { feedback($("action-msg"), "error", "连不上服务：" + e.message); }
   setTimeout(refresh, 800);
 }
+function takeOver(tid) {
+  const v = view.byId.get(tid);
+  askConfirm({title: "接管这颗种子？", name: v ? v.name : "#" + tid, text: view.warning, ok: "确认接管"})
+    .then((yes) => { if (yes) act({action: "takeover", torrent_id: tid, confirm: true}); });
+}
+// 区块里的按钮：行内主操作、批量修复、展开 / 收起
+$("sec-problem").parentElement.addEventListener("click", (ev) => {
+  const b = ev.target.closest("button");
+  if (!b) return;
+  if (b.dataset.act) {
+    const tid = Number(b.dataset.tid);
+    if (b.dataset.act === "takeover") takeOver(tid); else act({action: b.dataset.act, torrent_id: tid});
+  } else if (b.dataset.bulk) {
+    act({action: b.dataset.bulk, torrent_ids: b.dataset.ids.split(",").map(Number)});
+  } else if (b.dataset.expand) {
+    const key = b.dataset.expand;
+    if (view.open.has(key)) view.open.delete(key); else view.open.add(key);
+    rerender();
+  }
+});
+// 「⋯」菜单：components/MoreMenu.vue —— 打开时放到触发按钮旁、焦点到第一项；点一项就关、焦点回到触发按钮
+let menuTrigger = null;
+document.addEventListener("click", (ev) => {
+  const t = ev.target.closest("[data-more]");
+  if (!t) return;
+  menuTrigger = t;
+  const v = view.byId.get(Number(t.dataset.more));
+  $("row-menu").innerHTML = (v ? v.more : []).map((m) => `<button type="button" class="more-item" role="menuitem" data-menu-act="${esc(m.action)}"
+      data-tid="${v.torrent_id}">${esc(m.text)}</button>`).join("");
+}, true);
+$("row-menu").addEventListener("toggle", (event) => {
+  const menu = event.currentTarget;
+  if (event.newState !== "open" || !menuTrigger) return;
+  const r = menuTrigger.getBoundingClientRect(), w = menu.offsetWidth, h = menu.offsetHeight;
+  const below = r.bottom + 4 + h <= window.innerHeight - 8;
+  menu.style.top = `${below ? r.bottom + 4 : Math.max(8, r.top - 4 - h)}px`;
+  menu.style.left = `${Math.min(Math.max(8, r.right - w), window.innerWidth - w - 8)}px`;
+  const first = menu.querySelector(".more-item:not(:disabled)");
+  if (first) first.focus();
+});
+$("row-menu").addEventListener("click", (event) => {
+  const item = event.target.closest("[data-menu-act]");
+  if (!item) return;
+  event.currentTarget.hidePopover();
+  const back = menuTrigger && menuTrigger.isConnected ? menuTrigger
+    : document.querySelector(`[data-more="${item.dataset.tid}"]`);
+  if (back) back.focus({preventScroll: true});
+  const tid = Number(item.dataset.tid);
+  if (item.dataset.menuAct === "takeover") takeOver(tid); else act({action: item.dataset.menuAct, torrent_id: tid});
+});
 
 // 确认对话框（ConfirmDialog.vue）：接管一颗种子、打开「自动接管」都用它；确认 → true，取消 / Esc → false
 let confirmResolve = null;
@@ -656,16 +841,6 @@ function askConfirm({title, name = "", text, ok}) {
 }
 dialogs.setup($("confirm"), () => finishConfirm(false));
 $("confirm-form").addEventListener("submit", (ev) => { ev.preventDefault(); finishConfirm(true); });
-$("assignments").addEventListener("click", (ev) => {
-  const b = ev.target.closest("button[data-act]");
-  if (!b) return;
-  const tid = Number(b.dataset.tid);
-  if (b.dataset.act !== "takeover") { act({action: b.dataset.act, torrent_id: tid}); return; }
-  const row = (view.rows || []).find((r) => r.torrent_id === tid && r.ops.some((o) => o.action === "takeover"));
-  askConfirm({title: "接管这颗种子？", name: row ? row.name : "#" + tid, text: view.warning, ok: "确认接管"})
-    .then((yes) => { if (yes) act({action: "takeover", torrent_id: tid, confirm: true}); });
-});
-$("retry-all").onclick = () => act({action: "retry"});
 
 // ---------------- 设置 ----------------
 const TEST_TEXT = {

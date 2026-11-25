@@ -10,6 +10,7 @@ import os
 import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
@@ -266,22 +267,32 @@ async def test_downloader(request: Request):
     return {**result, "free_text": view.human_size(free) if free is not None else ""}
 
 
-ACTIONS = ("retry", "resume", "takeover")
+ACTIONS = ("retry", "resume", "recheck", "takeover")
+MAX_BULK = 2000
+
+
+def _is_id(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
 
 
 @app.post("/api/action")
 async def manual_action(request: Request):
-    """面板上的手动操作：{action: retry|resume|takeover, torrent_id}。retry 不带 torrent_id = 全部重试；
-    takeover 必须带 confirm: true（面板先弹确认框）。"""
+    """面板上的手动操作：{action: retry|resume|recheck|takeover, torrent_id}。retry 不带 torrent_id = 全部重试；
+    「需要处理」一行原因的批量修复带 torrent_ids（retry / resume / recheck）；
+    takeover 必须带 confirm: true（面板先弹确认框）。recheck 与 resume 是同一个操作（出错的就重新校验）。"""
     body = await _json_body(request)
-    action, tid = body.get("action"), body.get("torrent_id")
-    if action not in ACTIONS or (tid is not None and (isinstance(tid, bool) or not isinstance(tid, int))):
+    action, tid, ids = body.get("action"), body.get("torrent_id"), body.get("torrent_ids")
+    if action not in ACTIONS or (tid is not None and not _is_id(tid)):
         return JSONResponse({"error": {"code": "invalid"}}, status_code=422)
-    if action != "retry" and tid is None:
+    if ids is not None and (action == "takeover" or tid is not None or not isinstance(ids, list) or not ids
+                            or len(ids) > MAX_BULK or not all(_is_id(x) for x in ids)):
+        return JSONResponse({"error": {"code": "invalid"}}, status_code=422)
+    if action != "retry" and tid is None and ids is None:
         return JSONResponse({"error": {"code": "invalid"}}, status_code=422)
     if action == "takeover" and body.get("confirm") is not True:
         return JSONResponse({"error": {"code": "not_confirmed"}}, status_code=422)
-    result = await asyncio.to_thread(runner.act, action, tid)
+    action = "resume" if action == "recheck" else action
+    result = await asyncio.to_thread(runner.act, action, tid, ids)
     return JSONResponse(result, status_code=200 if result.get("ok") else 409)
 
 

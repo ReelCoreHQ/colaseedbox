@@ -197,8 +197,15 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(self.client.post("/api/action", content="{}", headers={"Content-Type": "text/plain"}).status_code,
                          415)
         for body in ({"action": "nuke", "torrent_id": 1}, {"action": "resume"}, {"action": "resume", "torrent_id": "1"},
-                     {"action": "takeover", "torrent_id": 1}, {"action": "takeover", "torrent_id": 1, "confirm": "yes"}):
+                     {"action": "takeover", "torrent_id": 1}, {"action": "takeover", "torrent_id": 1, "confirm": "yes"},
+                     {"action": "retry", "torrent_ids": []}, {"action": "retry", "torrent_ids": [1, "2"]},
+                     {"action": "retry", "torrent_ids": "1"}, {"action": "resume", "torrent_ids": [1], "torrent_id": 1},
+                     {"action": "takeover", "torrent_ids": [1], "confirm": True},
+                     {"action": "retry", "torrent_ids": list(range(2001))}):
             self.assertEqual(self.client.post("/api/action", json=body).status_code, 422, body)
+        r = self.client.post("/api/action", json={"action": "recheck", "torrent_ids": [1, 2]})
+        self.assertIn(r.status_code, (200, 409))
+        self.assertIn("message", r.json())
         r = self.client.post("/api/action", json={"action": "retry"})
         self.assertIn(r.status_code, (200, 409))
         self.assertIn("message", r.json())

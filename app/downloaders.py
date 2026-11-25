@@ -179,7 +179,7 @@ def _parse_add(ret: Any) -> Tuple[bool, List[str]]:
 
 #: clients.TrDownloader 读的字段
 TR_FIELDS = ["id", "hashString", "name", "status", "error", "labels", "downloadDir", "percentDone",
-             "totalSize", "uploadedEver"]
+             "totalSize", "uploadedEver", "rateDownload", "eta"]
 
 
 class TrInstance:

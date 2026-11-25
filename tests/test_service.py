@@ -16,6 +16,7 @@ from app.config import ConfigError, Store, merge_update, normalize, public_view
 from app.runner import Runner
 from app.seedgroup import VENDOR, VERSION
 from app.seedgroup.clients import wrap
+from app.seedgroup.engine import human_size
 
 TAG = "可乐保种组"
 PATH = "/downloads/colaseedgroup"
@@ -191,7 +192,7 @@ class Box(unittest.TestCase):
         st = self.status()
         self.assertEqual((st["owned_count"], st["owned_total_text"]), (2, "112 MiB"))
         self.assertEqual(st["last"]["capacity_text"], "2.0 TiB")
-        self.assertIsNone(st["assignments"])   # 老版本留下的 last_run 没有快照
+        self.assertIsNone(st["groups"])   # 老版本留下的 last_run 没有快照
         # 老版本的 last_run 也没有下载器快照：配置里的下载器照样列出，标成「待同步」
         self.assertEqual(st["downloaders"], [{"name": "qb1", "type": "qbittorrent", "reachable": None,
                                               "free_bytes": None, "free_text": "", "low": False}])
@@ -215,21 +216,22 @@ class Box(unittest.TestCase):
         st = self.status()
         self.assertEqual(st["assign_stats"], {"count": 4, "size_text": "4.0 KiB", "removing": 1, "problem": 0,
                                               "pending_count": 1, "pending_bytes": 1024, "pending_text": "1.0 KiB"})
-        self.assertNotIn("assignment_summary_text", st)
-        got = [(r["name"], r["action_text"], r["local_text"], r["downloader"], [o["action"] for o in r["ops"]])
-               for r in st["assignments"]]
-        self.assertEqual(got, [
-            ("#5", "新派", "待加种（派单没有下载链接）", "", []),
-            ("#4", "收回", "站点已收回，下载器里已没有", "", []),
-            ("New.Film", "新派", "本轮已加", "qb1", []),
-            ("Theirs.Film", "保持", "已在下载器（非插件管理）·做种中", "qb1", ["takeover"]),
-            ("站点给的名字", "保持", "插件管理·下载中 0%", "qb1", []),
-        ])
-        self.assertEqual([r["filter"] for r in st["assignments"]], ["pending", "", "", "", ""])
-        self.assertEqual(st["default_filter"], "all")
-        self.assertEqual([f["text"] for f in st["filters"]], ["异常", "待加种", "全部"])
+        for gone in ("assignments", "filters", "default_filter", "assignment_summary_text"):
+            self.assertNotIn(gone, st)
+        g = st["groups"]
+        self.assertEqual((g["count"], g["size_text"]), (5, "5.0 KiB"))
+        secs = {x["key"]: x for x in g["sections"]}
+        self.assertEqual(list(secs), ["active", "seeding", "removing"])          # 没有异常：不出现
+        self.assertEqual([(v["name"], v["badge"], v["note"]) for v in secs["active"]["rows"]],
+                         [("New.Film", "插件管理", "本轮已加"), ("站点给的名字", "插件管理", "")])
+        self.assertEqual([(p["label"], p["count"]) for p in secs["active"]["pending"]], [("派单没有下载链接", 1)])
+        theirs_row = secs["seeding"]["rows"][0]
+        self.assertEqual((theirs_row["name"], theirs_row["badge"], theirs_row["primary"],
+                          [m["action"] for m in theirs_row["more"]]), ("Theirs.Film", "非插件管理", None, ["takeover"]))
+        self.assertIsNone(theirs_row["site"])                                     # 站点没给观测字段：不显示
+        self.assertEqual([(v["name"], v["outcome_text"]) for v in secs["removing"]["rows"]], [("#4", "下载器里已没有")])
+        self.assertEqual(secs["seeding"]["rows"][0]["size_text"], "1.0 KiB")
         self.assertIn("连同文件一起删除", st["takeover_warning"])
-        self.assertEqual(st["assignments"][2]["size_text"], "1.0 KiB")
         blob = json.dumps(st, ensure_ascii=False)
         for h in (mine, theirs, new, gone, later):
             self.assertNotIn(h, blob)
@@ -253,9 +255,12 @@ class Box(unittest.TestCase):
     def test_actions_resume_retry_and_refusals(self):
         mine, theirs, failed, _ = self.seed_actions()
         st = self.status()
-        self.assertEqual(st["default_filter"], "problem")
-        ops = {r["name"]: [o["action"] for o in r["ops"]] for r in st["assignments"]}
-        self.assertEqual(ops, {"Mine.Film": ["resume"], "Theirs.Film": ["takeover"], "#3": ["retry"]})
+        problem = st["groups"]["sections"][0]
+        self.assertEqual(problem["key"], "problem")
+        self.assertEqual([(c["label"], (c["fix"] or {}).get("action")) for c in problem["causes"]],
+                         [("下载器里已暂停", "resume"), ("加种失败 · 站点返回 404", "retry")])
+        rows = {v["name"]: v for sec in st["groups"]["sections"] for v in sec.get("rows", [])}
+        self.assertEqual([m["action"] for m in rows["Theirs.Film"]["more"]], ["takeover"])
         r = self.runner.act("resume", 2)                       # 不是本服务的：拒绝，碰都不碰
         self.assertEqual((r["ok"], r["code"]), (False, "not_owned"))
         self.assertEqual(self.qb.qbc.calls, [])
@@ -294,11 +299,12 @@ class Box(unittest.TestCase):
 
     def test_panel_renders_assignment_table(self):
         html = (ROOT / "templates" / "index.html").read_text("utf-8")
-        for text in (">种子名</th>", ">体积</th>", ">站点要求</th>", ">本地情况</th>", ">下载器</th>", ">操作</th>",
+        for text in ("需要处理", "进行中", "做种中", "即将删除", 'role="progressbar"', 'popovertarget="row-menu"',
                      "/account/seed-group", "站点上的我的保种组 ↗", "const PAGE = 50", "showModal", "/api/action",
-                     "aria-pressed", "/api/downloaders/test", 'role="switch"', "trapFocus", "修改登录密码"):
+                     "aria-pressed", "aria-expanded", "torrent_ids", "/api/downloaders/test", 'role="switch"',
+                     "trapFocus", "修改登录密码"):
             self.assertIn(text, html)
-        for gone in ("info_hash", "本轮跳过", "删种闸门：开", "assignment_summary_text"):
+        for gone in ("info_hash", "本轮跳过", "删种闸门：开", "assignment_summary_text", ">站点要求<", "<table"):
             self.assertNotIn(gone, html)
         # 开关全用 input.switch：页面上没有别的复选框
         self.assertEqual(html.count('type="checkbox"'), html.count('type="checkbox" role="switch" class="switch"'))
@@ -319,7 +325,8 @@ class Box(unittest.TestCase):
         self.assertTrue(self.store.load_state()["owned"][theirs]["taken_over"])
         st = self.status()
         self.assertEqual(st["last"]["taken_over"], 1)
-        self.assertEqual([r["local_text"] for r in st["assignments"]], ["本轮自动接管"])
+        took = st["groups"]["sections"][0]["rows"][0]
+        self.assertEqual((took["badge"], took["note"]), ("已接管", "本轮自动接管"))
         self.assertIn("自动接管 Theirs.Film", LOG.text())
         self.assertNotIn(theirs, json.dumps(st, ensure_ascii=False))
 
@@ -371,7 +378,7 @@ class HumanSize(unittest.TestCase):
                  (112 * 1024 ** 2, "112 MiB"), (2048 * 1024 ** 3, "2.0 TiB"), (1536 * 1024 ** 3, "1.5 TiB"),
                  (None, "-"), ("x", "-")]
         for value, want in cases:
-            self.assertEqual(view.human_size(value), want, value)
+            self.assertEqual(human_size(value), want, value)
 
 
 class ConfigTests(unittest.TestCase):
