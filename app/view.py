@@ -1,14 +1,13 @@
 """面板数据：把上一轮结果与账本整理成页面要显示的东西（文案、体积换算、错误码说明）。
 
-与插件页（plugins.v3/colaseedgroup/__init__.py 的 get_page）同口径：上次运行结果、派单条数、
-本服务管理的种子与体积、本轮新加/删除、申报空间，以及**全部派单**的表（种子名 | 体积 | 站点要求 |
+与插件页（plugins.v3/colaseedgroup/__init__.py 的 get_page）同口径：上次运行结果、派单条数与体积、
+本服务管理的种子与体积、异常条数、各下载器连得上没有与剩余空间，以及**全部派单**的表（种子名 | 体积 | 站点要求 |
 本地情况 | 下载器）。派单表的行、顺序、文案都来自搬来的执行器（``seedgroup.engine``），与插件页逐字一致；
 不显示 info_hash。体积一律自动换算单位。
 错误只按固定原因码 / 站点的 ``code`` 显示，从不显示站点 ``message`` 或异常原文。
 """
 
 import time
-from collections import Counter
 from typing import Any, Dict, List, Optional
 
 from .seedgroup.engine import (
@@ -19,7 +18,6 @@ from .seedgroup.engine import (
     local_text,
     row_actions,
     row_filter,
-    summary_text,
     takeover_warning,
 )
 
@@ -163,7 +161,46 @@ def _errors(last: Dict[str, Any]) -> List[Dict[str, str]]:
         name, _, code = str(item).partition(":")
         out.append({"where": f"下载器 {name}", **explain(code)})
     if last.get("delete_block") and last.get("status") == "ok":
-        out.append({"where": "删种闸门", **explain(last["delete_block"])})
+        out.append({"where": "本轮不删种", **explain(last["delete_block"])})
+    return out
+
+
+#: 还要占盘的派单：待加种、加种失败退避中（站点收回的不算）
+_TO_ADD = ("pending", "backoff")
+
+
+def _assign_stats(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+    kept = [r for r in rows if r.get("action") != "remove"]
+    size = sum(int(r.get("size") or 0) for r in kept)
+    pending = sum(int(r.get("size") or 0) for r in kept if r.get("local") in _TO_ADD)
+    return {
+        "count": len(kept),
+        "size_text": human_size(size),
+        "removing": len(rows) - len(kept),
+        "problem": sum(1 for r in rows if row_filter(r) == "problem"),
+        "pending_count": sum(1 for r in kept if r.get("local") in _TO_ADD),
+        "pending_bytes": pending,
+        "pending_text": human_size(pending),
+    }
+
+
+def downloader_cards(cfg: Dict[str, Any], last: Dict[str, Any], pending_bytes: int) -> List[Dict[str, Any]]:
+    """「下载器」卡：每台所选下载器连得上没有、剩余空间（上一轮读的）。剩余空间少于还要加的体积就提醒。
+    配置里有、上一轮还没读过的下载器 reachable 为 None（面板显示「下一轮后显示」）。"""
+    seen = {d.get("name"): d for d in last.get("downloaders") or [] if isinstance(d, dict)}
+    out = []
+    for conf in cfg.get("downloaders") or []:
+        got = seen.get(conf["name"])
+        free = got.get("free_bytes") if got else None
+        free = free if isinstance(free, int) and not isinstance(free, bool) else None
+        out.append({
+            "name": conf["name"],
+            "type": conf["type"],
+            "reachable": bool(got.get("reachable")) if got else None,
+            "free_bytes": free,
+            "free_text": human_size(free) if free is not None else "",
+            "low": free is not None and free < pending_bytes,
+        })
     return out
 
 
@@ -171,7 +208,6 @@ def status(cfg: Dict[str, Any], state: Dict[str, Any], last: Dict[str, Any], *, 
            running: bool, next_run_at: Any, missing: List[str]) -> Dict[str, Any]:
     owned = state.get("owned") or {}
     total = sum(int(rec.get("size") or 0) for rec in owned.values())
-    skipped = Counter(str(v).split(":", 1)[0] for v in (last.get("skipped") or {}).values())
     stat = last.get("status")
     summary = None
     if last:
@@ -182,18 +218,18 @@ def status(cfg: Dict[str, Any], state: Dict[str, Any], last: Dict[str, Any], *, 
             "finished_at": last.get("finished_at") or last.get("started_at"),
             "revision": last.get("revision"),
             "items": last.get("items"),
-            "action_counts": last.get("action_counts") or {},
             "capacity_gib": last.get("capacity_gib"),
-            "capacity_text": human_size(int(last["capacity_gib"]) * 1024 ** 3) if last.get("capacity_gib") else "-",
+            "capacity_text": human_size(int(last["capacity_gib"]) * 1024 ** 3) if last.get("capacity_gib") else "",
             "added": len(last.get("added") or []),
             "removed": len(last.get("removed") or []),
-            "skipped": [{"code": k, "count": n, "text": SKIP_TEXT.get(k, k)} for k, n in sorted(skipped.items())],
             "deletes_allowed": bool(last.get("deletes_allowed")),
             "state_reported": bool(last.get("state_reported")),
             "min_plugin_version": last.get("min_plugin_version") or "",
             "outdated": stat == "outdated",
             "errors": _errors(last),
         }
+    rows = last.get("assignments") or []
+    stats = _assign_stats(rows)
     return {
         "version": version,
         "now": time.time(),
@@ -204,10 +240,11 @@ def status(cfg: Dict[str, Any], state: Dict[str, Any], last: Dict[str, Any], *, 
         "missing": [{"code": m, "text": REASON_TEXT.get(m, m)} for m in missing],
         "last": summary,
         "assignments": assignments(last),
+        "assign_stats": stats,
+        "downloaders": downloader_cards(cfg, last, stats["pending_bytes"]),
         "filters": [{"key": k, "text": t} for k, t in FILTERS],
-        "default_filter": default_filter(last.get("assignments") or []),
+        "default_filter": default_filter(rows),
         "takeover_warning": takeover_warning(bool(cfg.get("delete_files", True))),
-        "assignment_summary_text": summary_text(last.get("assignment_summary") or {}),
         "assignments_truncated": int(last.get("assignments_truncated") or 0),
         "owned_count": len(owned),
         "owned_total": total,

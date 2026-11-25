@@ -4,48 +4,27 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>登录 · 可乐保种组</title>
+<link rel="stylesheet" href="/panel.css">
 <style>
-  :root {
-    --bg: #f6f6f4; --card: #ffffff; --fg: #1d1d1b; --muted: #6b6b66; --line: #e3e2dd;
-    --accent: #b3261e; --err-bg: #fde8e6; --err-fg: #9b1c14; --warn-bg: #fff4dc; --warn-fg: #7a5200;
-    --on-accent: #ffffff;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #151514; --card: #1f1f1d; --fg: #ecebe6; --muted: #a09f98; --line: #34332f;
-      --accent: #ff7a6e; --err-bg: #3d1a17; --err-fg: #ffaaa2; --warn-bg: #3a2d0e; --warn-fg: #f2c86b;
-      --on-accent: #1d0d0b;
-    }
-  }
-  * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--fg);
-         font: 14px/1.55 system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; }
-  main { max-width: 400px; margin: 0 auto; padding: 12vh 16px 48px; }
-  h1 { font-size: 20px; margin: 0 0 4px; }
-  .muted { color: var(--muted); }
-  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 18px 16px; margin-top: 16px; }
-  label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 3px; }
-  input { width: 100%; font: inherit; padding: 8px 10px; border-radius: 8px;
-          border: 1px solid var(--line); background: var(--bg); color: var(--fg); }
-  button { font: inherit; border-radius: 8px; padding: 8px 14px; cursor: pointer; width: 100%; margin-top: 14px;
-           background: var(--accent); border: 1px solid var(--accent); color: var(--on-accent); }
-  button:disabled { opacity: .55; cursor: default; }
-  button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-  .alert { border-radius: 8px; padding: 9px 12px; margin-top: 12px; }
-  .alert.err { background: var(--err-bg); color: var(--err-fg); }
-  .alert.warn { background: var(--warn-bg); color: var(--warn-fg); }
-  .hint { font-size: 12px; color: var(--muted); margin-top: 14px; }
-  code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+  /* 组件与设计档位在 /panel.css（照搬 reelcore-ui）；这里只排版 */
+  main { width: min(420px, calc(100vw - 32px)); margin: 0 auto; padding: 12vh 0 var(--space-32); }
+  .site-brand { display: block; margin-bottom: var(--space-4); }
+  .lead { margin: 0 0 var(--space-16); color: var(--text-muted); font-size: var(--text-md); }
+  form.panel { display: grid; gap: var(--space-16); }
+  form.panel button[type="submit"] { width: 100%; }
+  .hint { margin: var(--space-16) 0 0; color: var(--text-muted); font-size: var(--text-xs); line-height: 1.6; }
 </style>
 </head>
 <body>
 <main>
-  <h1>可乐保种组 <span class="muted" style="font-weight:400">· Docker 版</span></h1>
-  <div class="muted">登录后才能查看状态、修改设置。</div>
-  <form class="card" id="login">
-    <label for="password">登录密码</label>
-    <input id="password" name="password" type="password" autocomplete="current-password" required autofocus>
-    <div id="msg" role="alert" hidden></div>
+  <h1 class="site-brand">可乐保种组 <small>· Docker 版</small></h1>
+  <p class="lead">登录后才能查看状态、修改设置。</p>
+  <form class="panel" id="login">
+    <div class="field">
+      <label for="password">登录密码</label>
+      <input id="password" name="password" type="password" autocomplete="current-password" required autofocus>
+    </div>
+    <p id="msg" class="action-feedback" role="alert"></p>
     <button type="submit" id="go">登录</button>
   </form>
   <p class="hint">第一次启动时，初始密码只在容器日志里显示一次：<code>docker logs colaseedgroup-docker</code>，找「初始登录密码」。</p>
@@ -56,11 +35,10 @@
 const $ = (id) => document.getElementById(id);
 let timer = null;
 
-function show(cls, text) {
+function show(tone, text) {
   const m = $("msg");
-  m.className = "alert " + cls;
+  m.className = "action-feedback" + (tone === "warning" ? " action-feedback--warning" : "");
   m.textContent = text;
-  m.hidden = false;
 }
 
 function wait(seconds) {
@@ -68,8 +46,8 @@ function wait(seconds) {
   let left = seconds;
   $("go").disabled = true;
   const tick = () => {
-    if (left <= 0) { clearInterval(timer); $("go").disabled = false; $("msg").hidden = true; return; }
-    show("warn", `错误次数太多，请 ${left} 秒后再试。`);
+    if (left <= 0) { clearInterval(timer); $("go").disabled = false; show("", ""); return; }
+    show("warning", `错误次数太多，请 ${left} 秒后再试。`);
     left -= 1;
   };
   tick();
@@ -88,9 +66,9 @@ $("login").addEventListener("submit", async (ev) => {
     $("password").value = "";
     $("password").focus();
     if (r.status === 429) { wait(err.retry_after || 5); return; }
-    show("err", r.status === 401 ? "密码不对。" : "登录失败：" + (err.code || r.status));
+    show("error", r.status === 401 ? "密码不对。" : "登录失败：" + (err.code || r.status));
   } catch (e) {
-    show("err", "连不上服务：" + e.message);
+    show("error", "连不上服务：" + e.message);
   }
   $("go").disabled = false;
 });

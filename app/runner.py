@@ -86,9 +86,10 @@ class Runner:
         try:
             site = RecordingSiteClient(cfg["site_url"], cfg["api_key"], cfg["instance_id"], user_agent=USER_AGENT)
             site.last_counts = {}
+            downloaders = self._build(cfg["downloaders"])
             engine = Engine(
                 site=site,
-                downloaders=self._build(cfg["downloaders"]),
+                downloaders=downloaders,
                 settings=Settings(save_path=cfg["save_path"], tag=cfg["tag"], max_adds=cfg["max_adds"],
                                   max_deletes=cfg["max_deletes"], delete_files=cfg["delete_files"]),
                 state=self.store.load_state(),
@@ -99,6 +100,9 @@ class Runner:
             )
             report = engine.run().to_dict()
             report["action_counts"] = site.last_counts
+            if not self._stop.is_set():
+                # 每轮一次、只读：各下载器连得上没有、剩余空间（面板的「下载器」卡）
+                report["downloaders"] = downloaders_mod.capture(downloaders, cfg["save_path"], report.get("errors"))
         except Exception as err:
             # 兜底：只记异常类型（异常原文可能带地址）
             log.error("[可乐保种组] 本轮异常中止：%s", type(err).__name__)

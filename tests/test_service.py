@@ -191,8 +191,11 @@ class Box(unittest.TestCase):
         st = self.status()
         self.assertEqual((st["owned_count"], st["owned_total_text"]), (2, "112 MiB"))
         self.assertEqual(st["last"]["capacity_text"], "2.0 TiB")
-        self.assertEqual(st["last"]["skipped"][0]["code"], "external")
         self.assertIsNone(st["assignments"])   # 老版本留下的 last_run 没有快照
+        # 老版本的 last_run 也没有下载器快照：配置里的下载器照样列出，标成「待同步」
+        self.assertEqual(st["downloaders"], [{"name": "qb1", "type": "qbittorrent", "reachable": None,
+                                              "free_bytes": None, "free_text": "", "low": False}])
+        self.assertNotIn("skipped", st["last"])
 
     def test_status_lists_every_assignment_by_name_without_hash(self):
         mine = self.own("Mine.Film", 1)
@@ -210,7 +213,9 @@ class Box(unittest.TestCase):
                              "/state": Rsp(200, {"ok": True})})
         self.assertEqual(self.runner.run_cycle()["status"], "ok")
         st = self.status()
-        self.assertEqual(st["assignment_summary_text"], "派单 5 · 插件管理 2 · 非插件管理 1 · 待加种 1 · 退避 0 · 收回 1")
+        self.assertEqual(st["assign_stats"], {"count": 4, "size_text": "4.0 KiB", "removing": 1, "problem": 0,
+                                              "pending_count": 1, "pending_bytes": 1024, "pending_text": "1.0 KiB"})
+        self.assertNotIn("assignment_summary_text", st)
         got = [(r["name"], r["action_text"], r["local_text"], r["downloader"], [o["action"] for o in r["ops"]])
                for r in st["assignments"]]
         self.assertEqual(got, [
@@ -289,11 +294,55 @@ class Box(unittest.TestCase):
 
     def test_panel_renders_assignment_table(self):
         html = (ROOT / "templates" / "index.html").read_text("utf-8")
-        for text in ("<th>种子名</th>", "<th class=\"num\">体积</th>", "<th>站点要求</th>", "<th>本地情况</th>",
-                     "<th>下载器</th>", "<th>操作</th>", "/account/seed-group", "s.assignment_summary_text",
-                     "const PAGE = 50", "showModal", "/api/action", "aria-pressed"):
+        for text in (">种子名</th>", ">体积</th>", ">站点要求</th>", ">本地情况</th>", ">下载器</th>", ">操作</th>",
+                     "/account/seed-group", "站点上的我的保种组 ↗", "const PAGE = 50", "showModal", "/api/action",
+                     "aria-pressed", "/api/downloaders/test", 'role="switch"', "trapFocus", "修改登录密码"):
             self.assertIn(text, html)
-        self.assertNotIn("info_hash", html)
+        for gone in ("info_hash", "本轮跳过", "删种闸门：开", "assignment_summary_text"):
+            self.assertNotIn(gone, html)
+        # 开关全用 input.switch：页面上没有别的复选框
+        self.assertEqual(html.count('type="checkbox"'), html.count('type="checkbox" role="switch" class="switch"'))
+
+    # ---------------- 下载器剩余空间（每轮读一次，记进 last_run） ----------------
+    def run_empty(self):
+        self.session({"/assignment": Rsp(200, assignment([item(make_torrent("Big")[1], 9, "add", size=5 * 1024 ** 4,
+                                                                url=f"{SITE}/gone")])),
+                      "/gone": Rsp(404, {}), "/state": Rsp(200, {"ok": True})})
+        return self.runner.run_cycle()
+
+    def test_free_space_captured_once_per_run(self):
+        calls = []
+        orig = self.qb.qbc.sync_maindata
+        self.qb.qbc.sync_maindata = lambda: calls.append(1) or orig()
+        report = self.run_empty()
+        self.assertEqual(calls, [1])
+        self.assertEqual(report["downloaders"], [{"name": "qb1", "type": "qbittorrent", "reachable": True,
+                                                  "free_bytes": 3 * 1024 ** 4}])
+        self.assertEqual(self.store.load_last_run()["downloaders"], report["downloaders"])
+        st = self.status()
+        card = st["downloaders"][0]
+        self.assertEqual((card["reachable"], card["free_text"]), (True, "3.0 TiB"))
+        self.assertTrue(card["low"])           # 还要加 5 TiB，只剩 3 TiB
+        self.assertEqual(st["assign_stats"]["pending_text"], "5.0 TiB")
+        self.qb.qbc.free = 8 * 1024 ** 4
+        self.run_empty()
+        self.assertFalse(self.status()["downloaders"][0]["low"])
+
+    def test_free_space_unreadable_and_unreachable(self):
+        self.qb.qbc.fail_maindata = True
+        report = self.run_empty()
+        self.assertEqual(report["downloaders"][0], {"name": "qb1", "type": "qbittorrent", "reachable": True,
+                                                    "free_bytes": None})
+        card = self.status()["downloaders"][0]
+        self.assertEqual((card["free_bytes"], card["free_text"], card["low"]), (None, "", False))
+        self.qb.qbc = None                     # 登录失败：连不上，也不去读
+        self.qb.reconnect = lambda: None       # 不真去连
+        report = self.run_empty()
+        self.assertEqual(report["downloaders"][0]["reachable"], False)
+        self.assertIsNone(report["downloaders"][0]["free_bytes"])
+        blob = LOG.text() + json.dumps(self.store.load_last_run(), ensure_ascii=False)
+        self.assertNotIn(LAN, blob)
+        self.assertNotIn(QB_PASS, blob)
 
 
 class HumanSize(unittest.TestCase):

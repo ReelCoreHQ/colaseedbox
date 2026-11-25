@@ -14,6 +14,7 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 
+from . import downloaders as downloaders_mod
 from . import view
 from .auth import MAX_PASSWORD, SESSION_TTL, Auth, PasswordError
 from .config import ConfigError, Store, merge_update, missing_fields, public_view
@@ -41,7 +42,7 @@ except ValueError as err:
 
 COOKIE = "colaseedgroup_session"
 # 不登录也能访问的路径；其余全部要会话（新加的接口默认受保护）
-PUBLIC_PATHS = {"/api/health", "/api/login", "/api/logout", "/login"}
+PUBLIC_PATHS = {"/api/health", "/api/login", "/api/logout", "/login", "/panel.css"}
 
 
 @asynccontextmanager
@@ -142,6 +143,13 @@ def index() -> FileResponse:
     return _page("index.html")
 
 
+@app.get("/panel.css")
+def panel_css() -> FileResponse:
+    """面板与登录页共用的样式（登录页也要用，所以不要会话）。"""
+    return FileResponse(BASE / "templates" / "panel.css", media_type="text/css; charset=utf-8",
+                        headers={"Cache-Control": "no-cache"})
+
+
 @app.get("/login")
 def login_page(request: Request) -> Response:
     if auth.valid(request.cookies.get(COOKIE)):
@@ -234,6 +242,28 @@ async def set_config(request: Request):
     log.info("配置已保存")
     runner.wake()
     return {**_config_view(cfg), "notes": notes}
+
+
+@app.post("/api/downloaders/test")
+async def test_downloader(request: Request):
+    """设置里每台下载器的「测试连接」：{name, type, url, username, password}，用填的值登录并列一次种子、
+    读剩余空间，只读。密码留空 = 用已保存的（同名且地址、类型、用户名都没改时，规则同保存配置）。
+    回结果码与数字，从不回地址、用户名、密码，日志里也不写。"""
+    body = await _json_body(request)
+    row = {k: body.get(k) for k in ("name", "type", "url", "username", "password")}
+    if not str(row.get("name") or "").strip():
+        row["name"] = "probe"
+    try:
+        merged, notes = merge_update(store.load(), {"downloaders": [row]})
+    except ConfigError as err:
+        return JSONResponse({"error": {"code": err.code, "field": err.field}}, status_code=422)
+    if any(n.startswith("password_cleared:") for n in notes):
+        # 改了地址 / 类型 / 用户名：已保存的密码不跟过去（防止把密码发到别的地址）
+        return {"result": "password_required"}
+    result = await asyncio.to_thread(downloaders_mod.probe, merged["downloaders"][0], merged["save_path"])
+    log.info("测试下载器连接：%s", result["result"])
+    free = result.get("free_bytes")
+    return {**result, "free_text": view.human_size(free) if free is not None else ""}
 
 
 ACTIONS = ("retry", "resume", "takeover")
