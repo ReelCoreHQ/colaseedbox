@@ -10,7 +10,7 @@
 import time
 from typing import Any, Dict, List
 
-from .seedgroup.engine import bucket, group_assignments, human_size, takeover_warning
+from .seedgroup.engine import CAPACITY_HINT, bucket, group_assignments, human_size, needs_capacity, takeover_warning
 
 STATUS_TEXT = {
     "ok": "正常",
@@ -175,6 +175,9 @@ def status(cfg: Dict[str, Any], state: Dict[str, Any], last: Dict[str, Any], *, 
             "items": last.get("items"),
             "capacity_gib": last.get("capacity_gib"),
             "capacity_text": human_size(int(last["capacity_gib"]) * 1024 ** 3) if last.get("capacity_gib") else "",
+            # 还没申报空间：站点照常给空派单、状态「正常」，面板顶部改成指去申报的提示
+            "needs_capacity": needs_capacity(last),
+            "capacity_hint": CAPACITY_HINT,
             "added": len(last.get("added") or []),
             "taken_over": len(last.get("taken_over") or []),
             "removed": len(last.get("removed") or []),
