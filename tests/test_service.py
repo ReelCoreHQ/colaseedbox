@@ -214,12 +214,14 @@ class Box(unittest.TestCase):
                              "/state": Rsp(200, {"ok": True})})
         self.assertEqual(self.runner.run_cycle()["status"], "ok")
         st = self.status()
-        self.assertEqual(st["assign_stats"], {"count": 4, "size_text": "4.0 KiB", "removing": 1, "problem": 0,
+        self.assertEqual(st["assign_stats"], {"count": 5, "size_text": "5.0 KiB", "removing": 1, "problem": 0,
                                               "pending_count": 1, "pending_bytes": 1024, "pending_text": "1.0 KiB"})
         for gone in ("assignments", "filters", "default_filter", "assignment_summary_text"):
             self.assertNotIn(gone, st)
         g = st["groups"]
         self.assertEqual((g["count"], g["size_text"]), (5, "5.0 KiB"))
+        # 概况卡与「全部派单」标题同一个口径：条数、体积都含站点收回的
+        self.assertEqual((st["assign_stats"]["count"], st["assign_stats"]["size_text"]), (g["count"], g["size_text"]))
         secs = {x["key"]: x for x in g["sections"]}
         self.assertEqual(list(secs), ["active", "seeding", "removing"])          # 没有异常：不出现
         self.assertEqual([(v["name"], v["badge"], v["note"]) for v in secs["active"]["rows"]],

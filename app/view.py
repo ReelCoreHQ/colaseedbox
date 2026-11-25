@@ -124,11 +124,12 @@ _TO_ADD = ("pending", "backoff")
 
 
 def _assign_stats(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+    # 条数与体积算全部派单（含站点收回的），与「全部派单」标题一致；收回的另在 removing 里
     kept = [r for r in rows if r.get("action") != "remove"]
-    size = sum(int(r.get("size") or 0) for r in kept)
+    size = sum(int(r.get("size") or 0) for r in rows)
     pending = sum(int(r.get("size") or 0) for r in kept if r.get("local") in _TO_ADD)
     return {
-        "count": len(kept),
+        "count": len(rows),
         "size_text": human_size(size),
         "removing": len(rows) - len(kept),
         "problem": sum(1 for r in rows if bucket(r) == "problem"),
